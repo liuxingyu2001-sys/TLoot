@@ -1,0 +1,48 @@
+prefix: "&6[寻宝] &r"
+
+general:
+  no-permission: "&c你没有权限执行此操作！"
+  no-money: "&c你的金币不足！"
+  player-only: "&c此命令只能由玩家执行！"
+  invalid-number: "&c请输入有效的数字！"
+
+create:
+  success: "&a成功发起寻宝！宝藏已放置在指定位置。"
+  min-coins: "&c保底金币不能低于 {min}！"
+  max-coins: "&c保底金币不能超过 {max}！"
+  no-items: "&c请至少放入一件物品作为奖励！"
+  already-have-treasure: "&c你已经有一个正在进行的寻宝！"
+  cancelled: "&c寻宝发起已取消。"
+
+join:
+  success: "&a成功参与寻宝！你获得了寻宝指针。"
+  already-joined: "&c你已经参与了此寻宝！"
+  cannot-join-own: "&c你不能参与自己发起的寻宝！"
+  treasure-not-found: "&c找不到该寻宝！"
+
+claim:
+  success: "&a恭喜你找到了宝藏！获得了奖励！"
+  too-far: "&c你离宝藏太远了！请靠近一些。"
+  no-pointer: "&c你需要手持寻宝指针才能领取宝藏！"
+  not-your-treasure: "&c这个宝藏不是你参与的寻宝！"
+
+expire:
+  treasure-expired: "&c寻宝已过期，宝藏已消失。"
+  pointer-expired: "&c你的寻宝指针已失效。"
+
+pointer:
+  name: "&b寻宝指针"
+  lore:
+    - "&7发起者: &e{owner}"
+    - "&7保底金币: &6{coins}"
+    - "&7剩余时间: &c{time}"
+    - ""
+    - "&7指向宝藏方向..."
+
+treasure:
+  list-empty: "&c当前没有可参与的寻宝。"
+  info-header: "&6========== 寻宝信息 =========="
+  info-owner: "&e发起者: &f{owner}"
+  info-coins: "&e保底金币: &6{coins}"
+  info-time: "&e剩余时间: &c{time}"
+  info-participants: "&e参与人数: &f{count}"

@@ -1,0 +1,20 @@
+name: TLoot
+version: ${project.version}
+main: com.tloot.TLoot
+api-version: '1.20'
+author: liuxingyu
+description: 寻宝插件 - 玩家发起寻宝，其他玩家参与寻宝
+depend:
+  - Vault
+softdepend: []
+
+commands:
+  treasure:
+    description: 寻宝系统主命令
+    usage: /treasure [create|join|list|info|reload]
+    aliases: [tloot, t]
+
+permissions:
+  tloot.admin:
+    description: 管理员权限
+    default: op

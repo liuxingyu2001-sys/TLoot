@@ -1,0 +1,162 @@
+# ====================
+# TLoot 寻宝插件配置文件
+# ====================
+
+settings:
+  # 参与寻宝需要支付的门票金额（金币）
+  ticket-price: 500
+  
+  # 领取宝藏的最大距离（格）
+  claim-distance: 5
+  
+  # 宝藏过期时间（分钟），默认6小时
+  expire-time: 360
+  
+  # 发起寻宝时保底金币的最小值
+  min-guaranteed-coins: 100000
+  
+  # 发起寻宝时保底金币的最大值
+  max-guaranteed-coins: 1000000
+  
+  # 参与费用的最小值（不能为0）
+  min-ticket-price: 500
+
+# 寻宝指针设置
+pointer:
+  # 是否在 ActionBar 显示实时距离
+  enable-actionbar: true
+
+# 世界白名单 - 只允许在这些世界创建宝藏
+# 如果为空，则允许所有世界
+allowed-worlds:
+  - "world"
+  - "world_nether"
+  - "world_the_end"
+  - "zysj"
+  - "zyxj"
+  - "zymd"
+  - "99"
+
+# 世界名称替换 - 显示给玩家看的友好名称
+world-names:
+  "world": "生存世界"
+  "world_nether": "下界"
+  "world_the_end": "末地"
+  "zysj": "资源世界"
+  "zyxj": "资源下界"
+  "zymd": "资源末地"
+  "99": "久久世界"
+
+gui:
+  # 主菜单界面
+  main:
+    size: 27
+    title: "&8寻宝系统"
+  
+  # 发起寻宝界面
+  create:
+    size: 27
+    title: "&8发起寻宝"
+  
+  # 指南针领取界面
+  compass:
+    size: 54
+    title: "&8可参与的寻宝"
+    
+  # 金额调整设置
+  amount-adjust:
+    # 保底金币调整
+    guaranteed-coins:
+      left-click: 10000
+      right-click: 10000
+      shift-left-click: 100000
+      shift-right-click: 100000
+    # 参与费用调整
+    ticket-price:
+      left-click: 1000
+      right-click: 1000
+      shift-left-click: 10000
+      shift-right-click: 10000
+
+# ====================
+# 定时自动寻宝
+# ====================
+auto-treasure:
+  # 是否启用
+  enabled: true
+  
+  # 定时生成间隔（分钟），默认30分钟
+  interval: 30
+  
+  # 同时存在的系统宝藏最大数量
+  max-active: 3
+  
+  # 系统宝藏参与费用
+  ticket-price: 300
+  
+  # 系统宝藏过期时间（分钟），默认2小时
+  expire-time: 120
+  
+  # 保底金币范围
+  min-guaranteed-coins: 50000
+  max-guaranteed-coins: 500000
+  
+  # 按世界单独配置生成范围（不配则使用世界边界）
+  # 格式：世界名 → {min-x, max-x, min-z, max-z, min-y, max-y}
+  worlds:
+    "world":
+      min-x: -5000
+      max-x: 5000
+      min-z: -5000
+      max-z: 5000
+      min-y: 5
+      max-y: 320
+    "world_nether":
+      min-x: -3000
+      max-x: 3000
+      min-z: -3000
+      max-z: 3000
+      min-y: 5
+      max-y: 120
+    "zysj":
+      min-x: -3000
+      max-x: 3000
+      min-z: -3000
+      max-z: 3000
+      min-y: 5
+      max-y: 320
+
+  # 战利品表（按权重随机抽取）
+  # 支持物品和指令两种奖励，{player} 会替换为领取者名称
+  loot-table:
+    - material: DIAMOND
+      amount-min: 1
+      amount-max: 5
+      weight: 50
+    - material: GOLDEN_APPLE
+      amount-min: 1
+      amount-max: 3
+      weight: 30
+    - material: IRON_INGOT
+      amount-min: 5
+      amount-max: 20
+      weight: 80
+    - material: EMERALD
+      amount-min: 1
+      amount-max: 8
+      weight: 40
+    - material: ENCHANTED_GOLDEN_APPLE
+      amount-min: 1
+      amount-max: 1
+      weight: 5
+    - material: EXPERIENCE_BOTTLE
+      amount-min: 3
+      amount-max: 16
+      weight: 25
+    - material: NETHERITE_SCRAP
+      amount-min: 1
+      amount-max: 2
+      weight: 10
+    # 指令奖励示例（weight越小越稀有）
+    # - command: "give {player} minecraft:diamond_sword{display:{Name:'\\\"寻宝之剑\\\"'},Enchantments:[{id:sharpness,lvl:3}]} 1"
+    #   weight: 3
