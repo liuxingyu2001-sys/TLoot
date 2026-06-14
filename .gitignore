@@ -32,3 +32,13 @@ Thumbs.db
 
 # Local
 local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Node / Frontend
+node_modules/
+dist/
+build/

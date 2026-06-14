@@ -122,6 +122,6 @@ public class PointerListener implements Listener {
 
         Location loc = treasureLoc.clone().add(0, 1, 0);
         player.spawnParticle(Particle.END_ROD, loc, 10, 0.5, 0.5, 0.5, 0.1);
-        player.spawnParticle(Particle.FIREWORKS_SPARK, loc, 5, 0.3, 0.3, 0.3, 0.05);
+        player.spawnParticle(Particle.FIREWORK, loc, 5, 0.3, 0.3, 0.3, 0.05);
     }
 }
