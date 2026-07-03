@@ -42,6 +42,9 @@ public class TreasureExpireTask extends BukkitRunnable {
     private void handleExpiredTreasure(Treasure treasure) {
         Location loc = treasure.getLocation();
         if (loc.getWorld() != null) {
+            // 强制加载区块，确保过期宝藏清理安全
+            loc.getWorld().getChunkAt(loc).load(true);
+
             Block block = loc.getBlock();
             if (block.getType() == Material.CHEST) {
                 block.setType(Material.AIR);

@@ -98,6 +98,9 @@ public class AutoTreasureTask extends BukkitRunnable {
         int ticketPrice = plugin.getConfigManager().getAutoTreasureTicketPrice();
         long expireTime = plugin.getConfigManager().getAutoTreasureExpireTime();
 
+        // 强制加载区块，确保方块操作安全
+        world.getChunkAt(chestLoc).load(true);
+
         Block block = chestLoc.getBlock();
         block.setType(Material.CHEST);
 
@@ -154,6 +157,17 @@ public class AutoTreasureTask extends BukkitRunnable {
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             int x = minX + random.nextInt(maxX - minX + 1);
             int z = minZ + random.nextInt(maxZ - minZ + 1);
+
+            int chunkX = x >> 4;
+            int chunkZ = z >> 4;
+
+            // 跳过未生成的区块，避免触发区块生成导致服务器卡顿或崩溃
+            if (!world.isChunkGenerated(chunkX, chunkZ)) {
+                continue;
+            }
+
+            // 加载区块确保方块数据在内存中
+            world.getChunkAt(chunkX, chunkZ).load(true);
 
             int highestY = world.getHighestBlockYAt(x, z);
 
