@@ -15,6 +15,9 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -27,6 +30,29 @@ public class TreasureListener implements Listener {
 
     public TreasureListener(TLoot plugin) {
         this.plugin = plugin;
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onBlockBreak(BlockBreakEvent event) {
+        Block block = event.getBlock();
+        if (block.getType() == Material.CHEST && findTreasureAtLocation(block.getLocation()) != null) {
+            event.setCancelled(true);
+            event.getPlayer().sendMessage(plugin.getMessageManager().get("prefix") + "§c这个宝藏箱子不能被破坏！");
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onEntityExplode(EntityExplodeEvent event) {
+        event.blockList().removeIf(block ->
+            block.getType() == Material.CHEST && findTreasureAtLocation(block.getLocation()) != null
+        );
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onBlockExplode(BlockExplodeEvent event) {
+        event.blockList().removeIf(block ->
+            block.getType() == Material.CHEST && findTreasureAtLocation(block.getLocation()) != null
+        );
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
