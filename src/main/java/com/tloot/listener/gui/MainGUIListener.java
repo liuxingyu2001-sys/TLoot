@@ -48,12 +48,19 @@ public class MainGUIListener implements Listener {
         int slot = event.getSlot();
 
         if (slot == 11) {
+            // 发起寻宝
             guiManager.openCreateMenu(player);
         } else if (slot == 13) {
+            // 参与寻宝
+            GUIManager.playClickSound(player);
             guiManager.openCompassMenu(player, 1);
         } else if (slot == 15) {
+            // 我的寻宝 → GUI!
+            guiManager.openMyTreasureGUI(player, 1);
+        } else if (slot == 22) {
+            // 帮助提示
             player.closeInventory();
-            guiManager.openMyTreasureMenu(player);
+            player.performCommand("treasure help");
         }
     }
 

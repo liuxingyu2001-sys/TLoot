@@ -54,39 +54,49 @@ public class CreateGUIListener implements Listener {
         ClickType clickType = event.getClick();
 
         if (slot == 11) {
+            // 调整保底金币 — 原地刷新，不重开 GUI
             if (clickType == ClickType.LEFT) {
                 guiManager.addCreateCoins(uuid, configManager.getGuaranteedCoinsLeftClick());
-                guiManager.openCreateMenu(player);
             } else if (clickType == ClickType.RIGHT) {
                 guiManager.removeCreateCoins(uuid, configManager.getGuaranteedCoinsRightClick());
-                guiManager.openCreateMenu(player);
             } else if (clickType == ClickType.SHIFT_LEFT) {
                 guiManager.addCreateCoins(uuid, configManager.getGuaranteedCoinsShiftLeftClick());
-                guiManager.openCreateMenu(player);
             } else if (clickType == ClickType.SHIFT_RIGHT) {
                 guiManager.removeCreateCoins(uuid, configManager.getGuaranteedCoinsShiftRightClick());
-                guiManager.openCreateMenu(player);
+            } else {
+                return;
             }
+            // 原地刷新，不闪烁
+            guiManager.refreshCreateMenu(player);
+            GUIManager.playClickSound(player);
+
         } else if (slot == 13) {
+            // 确认获取告示牌
             if (clickType == ClickType.LEFT || clickType == ClickType.RIGHT) {
                 guiManager.giveTreasureSign(player);
+                GUIManager.playSuccessSound(player);
                 player.closeInventory();
             }
+
         } else if (slot == 15) {
+            // 调整参与费用 — 原地刷新
             if (clickType == ClickType.LEFT) {
                 guiManager.addTicketPrice(uuid, configManager.getTicketPriceLeftClick());
-                guiManager.openCreateMenu(player);
             } else if (clickType == ClickType.RIGHT) {
                 guiManager.removeTicketPrice(uuid, configManager.getTicketPriceRightClick());
-                guiManager.openCreateMenu(player);
             } else if (clickType == ClickType.SHIFT_LEFT) {
                 guiManager.addTicketPrice(uuid, configManager.getTicketPriceShiftLeftClick());
-                guiManager.openCreateMenu(player);
             } else if (clickType == ClickType.SHIFT_RIGHT) {
                 guiManager.removeTicketPrice(uuid, configManager.getTicketPriceShiftRightClick());
-                guiManager.openCreateMenu(player);
+            } else {
+                return;
             }
+            guiManager.refreshCreateMenu(player);
+            GUIManager.playClickSound(player);
+
         } else if (slot == 22) {
+            // 返回主菜单
+            GUIManager.playClickSound(player);
             guiManager.openMainMenu(player);
         }
     }

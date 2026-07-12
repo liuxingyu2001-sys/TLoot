@@ -9,6 +9,7 @@ import com.tloot.gui.GUIManager;
 import com.tloot.listener.gui.CompassGUIListener;
 import com.tloot.listener.gui.CreateGUIListener;
 import com.tloot.listener.gui.MainGUIListener;
+import com.tloot.listener.gui.MyTreasureGUIListener;
 import com.tloot.listener.PointerListener;
 import com.tloot.listener.TreasureListener;
 import com.tloot.listener.TreasureSignListener;
@@ -63,6 +64,7 @@ public class TLoot extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new MainGUIListener(this), this);
         getServer().getPluginManager().registerEvents(new CreateGUIListener(this), this);
         getServer().getPluginManager().registerEvents(new CompassGUIListener(this), this);
+        getServer().getPluginManager().registerEvents(new MyTreasureGUIListener(this), this);
         getServer().getPluginManager().registerEvents(new PointerListener(this), this);
         getServer().getPluginManager().registerEvents(new TreasureListener(this), this);
         getServer().getPluginManager().registerEvents(new TreasureSignListener(this), this);
@@ -73,8 +75,10 @@ public class TLoot extends JavaPlugin {
         if (configManager.isAutoTreasureEnabled()) {
             autoTreasureTask = new AutoTreasureTask(this);
             long intervalTicks = configManager.getAutoTreasureInterval() * 60L * 20L;
-            autoTreasureTask.runTaskTimer(this, intervalTicks, intervalTicks);
-            getLogger().info("定时自动寻宝已启用，间隔: " + configManager.getAutoTreasureInterval() + "秒");
+            // 首次延迟 20 秒快速生成，之后按配置间隔
+            long initialDelay = 20L * 20L;
+            autoTreasureTask.runTaskTimer(this, initialDelay, intervalTicks);
+            getLogger().info("定时自动寻宝已启用，间隔: " + configManager.getAutoTreasureInterval() + " 分钟（首次 " + (initialDelay / 20) + " 秒后生成）");
         }
 
         getLogger().info("TLoot 寻宝插件已启用！");

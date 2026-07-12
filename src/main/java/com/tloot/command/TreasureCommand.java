@@ -138,7 +138,7 @@ public class TreasureCommand implements CommandExecutor, TabCompleter {
 
     private void handleMy(Player player) {
         GUIManager guiManager = plugin.getGuiManager();
-        guiManager.openMyTreasureMenu(player);
+        guiManager.openMyTreasureGUI(player, 1);
     }
 
     private void handleInfo(Player player, String[] args) {

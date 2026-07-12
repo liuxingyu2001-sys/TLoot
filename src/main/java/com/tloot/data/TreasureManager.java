@@ -83,11 +83,23 @@ public class TreasureManager {
                                     int ticketPrice,
                                     List<org.bukkit.inventory.ItemStack> items,
                                     List<String> commands) {
+        return createTreasure(ownerUuid, ownerName, location, guaranteedCoins, ticketPrice, items, commands, plugin.getConfigManager().getExpireTime());
+    }
+
+    /**
+     * 创建宝藏，使用自定义过期时间（供系统自动寻宝使用）
+     */
+    public Treasure createTreasure(UUID ownerUuid, String ownerName, 
+                                    org.bukkit.Location location, 
+                                    int guaranteedCoins, 
+                                    int ticketPrice,
+                                    List<org.bukkit.inventory.ItemStack> items,
+                                    List<String> commands,
+                                    long expireTimeMillis) {
         String id = generateId();
-        long expireTime = plugin.getConfigManager().getExpireTime();
         
         Treasure treasure = new Treasure(id, ownerUuid, ownerName, location, 
-                                         guaranteedCoins, ticketPrice, items, commands, expireTime, System.currentTimeMillis());
+                                         guaranteedCoins, ticketPrice, items, commands, expireTimeMillis, System.currentTimeMillis());
         treasures.put(id, treasure);
         saveTreasures();
         

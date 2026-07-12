@@ -46,7 +46,10 @@ public class AutoTreasureTask extends BukkitRunnable {
         int systemCount = countSystemTreasures();
         int maxActive = plugin.getConfigManager().getAutoTreasureMaxActive();
 
+        plugin.getLogger().info("[自动寻宝] 当前系统宝藏: " + systemCount + " / 最大: " + maxActive);
+
         if (systemCount >= maxActive) {
+            plugin.getLogger().info("[自动寻宝] 已达上限，跳过本次生成");
             return;
         }
 
@@ -67,28 +70,48 @@ public class AutoTreasureTask extends BukkitRunnable {
         List<String> worlds = plugin.getConfigManager().getAutoTreasureWorlds();
 
         if (worlds.isEmpty()) {
+            plugin.getLogger().warning("[自动寻宝] 没有配置可用的世界！请在 config.yml 的 auto-treasure.worlds 中配置");
             return;
         }
 
-        String worldName = worlds.get(random.nextInt(worlds.size()));
-        World world = Bukkit.getWorld(worldName);
-        if (world == null) {
+        plugin.getLogger().info("[自动寻宝] 可用世界: " + String.join(", ", worlds));
+
+        // 随机选世界，优先选已加载的
+        List<String> loadedWorlds = new ArrayList<>();
+        for (String wn : worlds) {
+            if (Bukkit.getWorld(wn) != null) {
+                loadedWorlds.add(wn);
+            }
+        }
+
+        if (loadedWorlds.isEmpty()) {
+            plugin.getLogger().warning("[自动寻宝] 所有配置的世界均未加载！worlds=" + String.join(", ", worlds));
             return;
         }
+
+        String worldName = loadedWorlds.get(random.nextInt(loadedWorlds.size()));
+        World world = Bukkit.getWorld(worldName);
+        if (world == null) {
+            return; // 不应到达
+        }
+
+        plugin.getLogger().info("[自动寻宝] 选中世界: " + worldName + "，正在寻找安全位置...");
 
         int[] range = plugin.getConfigManager().getAutoTreasureWorldRange(worldName);
         Location chestLoc = findSafeLocation(world, range);
         if (chestLoc == null) {
-            plugin.getLogger().warning("无法在 " + worldName + " 找到安全位置（已尝试100次），请检查 Y 范围或世界地形");
+            plugin.getLogger().warning("[自动寻宝] 在 " + worldName + " 中尝试 100 次未找到安全位置（可能区块未生成或地形不合适）");
             return;
         }
+
+        plugin.getLogger().info("[自动寻宝] 找到位置: " + worldName + " (" + chestLoc.getBlockX() + ", " + chestLoc.getBlockY() + ", " + chestLoc.getBlockZ() + ")");
 
         List<ItemStack> loot = new ArrayList<>();
         List<String> commands = new ArrayList<>();
         generateRewards(loot, commands);
 
         if (loot.isEmpty() && commands.isEmpty()) {
-            plugin.getLogger().warning("战利品表为空，无法生成系统宝藏");
+            plugin.getLogger().warning("[自动寻宝] 战利品表为空，无法生成系统宝藏");
             return;
         }
 
@@ -110,6 +133,7 @@ public class AutoTreasureTask extends BukkitRunnable {
         }
 
         TreasureManager treasureManager = plugin.getTreasureManager();
+        // 使用系统宝藏专属的过期时间
         Treasure treasure = treasureManager.createTreasure(
                 SYSTEM_OWNER_UUID,
                 SYSTEM_OWNER_NAME,
@@ -117,8 +141,16 @@ public class AutoTreasureTask extends BukkitRunnable {
                 guaranteedCoins,
                 ticketPrice,
                 loot,
-                commands
+                commands,
+                expireTime
         );
+
+        String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(worldName);
+        plugin.getLogger().info("[自动寻宝] 已生成宝藏 #" + treasure.getId()
+                + " 世界=" + worldDisplayName
+                + " 保底=" + guaranteedCoins
+                + " 费用=" + ticketPrice
+                + " 过期=" + (expireTime / 60000) + "分钟");
 
         broadcastTreasure(treasure);
     }
@@ -154,6 +186,11 @@ public class AutoTreasureTask extends BukkitRunnable {
             maxY = world.getMaxHeight();
         }
 
+        int skippedUngenerated = 0;
+        int skippedYRange = 0;
+        int skippedBadGround = 0;
+        int skippedBlocked = 0;
+
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             int x = minX + random.nextInt(maxX - minX + 1);
             int z = minZ + random.nextInt(maxZ - minZ + 1);
@@ -163,6 +200,7 @@ public class AutoTreasureTask extends BukkitRunnable {
 
             // 跳过未生成的区块，避免触发区块生成导致服务器卡顿或崩溃
             if (!world.isChunkGenerated(chunkX, chunkZ)) {
+                skippedUngenerated++;
                 continue;
             }
 
@@ -173,6 +211,7 @@ public class AutoTreasureTask extends BukkitRunnable {
 
             // 跳过超出 Y 范围的表面高度（如地狱基岩顶层）
             if (hasYRange && (highestY < minY || highestY > maxY)) {
+                skippedYRange++;
                 continue;
             }
 
@@ -180,16 +219,25 @@ public class AutoTreasureTask extends BukkitRunnable {
 
             Block ground = chestLoc.clone().subtract(0, 1, 0).getBlock();
             if (ground.isLiquid() || ground.isEmpty()) {
+                skippedBadGround++;
                 continue;
             }
 
             Block chestBlock = chestLoc.getBlock();
             if (!chestBlock.isEmpty() && !chestBlock.getType().isAir()) {
+                skippedBlocked++;
                 continue;
             }
 
             return chestLoc;
         }
+
+        // 详细失败原因
+        plugin.getLogger().warning("[自动寻宝] 位置搜索失败统计 (世界=" + world.getName()
+                + "): 未生成区块=" + skippedUngenerated
+                + ", Y范围不符=" + skippedYRange
+                + ", 地面不合适=" + skippedBadGround
+                + ", 位置被占=" + skippedBlocked);
 
         return null;
     }
