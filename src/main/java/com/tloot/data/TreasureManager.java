@@ -16,12 +16,14 @@ public class TreasureManager {
     private final File dataFile;
     private final Map<String, Treasure> treasures;
     private final Map<UUID, String> playerCreatingTreasure;
+    private final Map<String, String> locationIndex;  // 位置到宝藏ID的索引
 
     public TreasureManager(TLoot plugin) {
         this.plugin = plugin;
         this.dataFile = new File(plugin.getDataFolder(), "data.yml");
         this.treasures = new ConcurrentHashMap<>();
         this.playerCreatingTreasure = new ConcurrentHashMap<>();
+        this.locationIndex = new ConcurrentHashMap<>();
     }
 
     public void loadTreasures() {
@@ -31,10 +33,12 @@ public class TreasureManager {
 
         FileConfiguration dataConfig = YamlConfiguration.loadConfiguration(dataFile);
         ConfigurationSection treasuresSection = dataConfig.getConfigurationSection("treasures");
-        
+
         if (treasuresSection == null) {
             return;
         }
+
+        locationIndex.clear();
 
         for (String id : treasuresSection.getKeys(false)) {
             ConfigurationSection treasureSection = treasuresSection.getConfigurationSection(id);
@@ -46,6 +50,8 @@ public class TreasureManager {
                 Treasure treasure = Treasure.deserialize(data);
                 if (treasure != null && !treasure.isExpired()) {
                     treasures.put(id, treasure);
+                    // 添加位置索引
+                    locationIndex.put(locationToKey(treasure.getLocation()), id);
                 }
             }
         }
@@ -89,26 +95,49 @@ public class TreasureManager {
     /**
      * 创建宝藏，使用自定义过期时间（供系统自动寻宝使用）
      */
-    public Treasure createTreasure(UUID ownerUuid, String ownerName, 
-                                    org.bukkit.Location location, 
-                                    int guaranteedCoins, 
+    public Treasure createTreasure(UUID ownerUuid, String ownerName,
+                                    org.bukkit.Location location,
+                                    int guaranteedCoins,
                                     int ticketPrice,
                                     List<org.bukkit.inventory.ItemStack> items,
                                     List<String> commands,
                                     long expireTimeMillis) {
         String id = generateId();
-        
-        Treasure treasure = new Treasure(id, ownerUuid, ownerName, location, 
+
+        Treasure treasure = new Treasure(id, ownerUuid, ownerName, location,
                                          guaranteedCoins, ticketPrice, items, commands, expireTimeMillis, System.currentTimeMillis());
         treasures.put(id, treasure);
+        locationIndex.put(locationToKey(location), id);
         saveTreasures();
-        
+
         return treasure;
     }
 
     public void removeTreasure(String id) {
-        treasures.remove(id);
+        Treasure treasure = treasures.remove(id);
+        if (treasure != null) {
+            locationIndex.remove(locationToKey(treasure.getLocation()));
+        }
         saveTreasures();
+    }
+
+    private String locationToKey(org.bukkit.Location location) {
+        if (location == null || location.getWorld() == null) {
+            return null;
+        }
+        return location.getWorld().getName() + "," +
+               location.getBlockX() + "," +
+               location.getBlockY() + "," +
+               location.getBlockZ();
+    }
+
+    public Treasure findTreasureAtLocation(org.bukkit.Location location) {
+        if (location == null || location.getWorld() == null) {
+            return null;
+        }
+        String key = locationToKey(location);
+        String id = locationIndex.get(key);
+        return id != null ? treasures.get(id) : null;
     }
 
     public Treasure getTreasure(String id) {

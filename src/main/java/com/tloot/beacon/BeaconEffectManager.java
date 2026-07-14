@@ -47,11 +47,13 @@ public class BeaconEffectManager {
 
     private void drawBeaconBeam(Location baseLoc) {
         Location loc = baseLoc.clone();
-        loc.add(0.5, 1, 0.5);
+        loc.add(0.5, 1, 0);
 
-        int maxY = loc.getWorld().getMaxHeight();
-        for (int y = 0; y < maxY; y += 3) {
-            Location particleLoc = loc.clone().add(0, y, 0);
+        int maxY = Math.min(loc.getWorld().getMaxHeight(), 80);  // 限制最大高度，避免过高产生大量粒子
+        int startY = loc.getBlockY() + 1;
+
+        for (int y = startY; y < startY + maxY && y < loc.getWorld().getMaxHeight(); y += 4) {  // 增加间隔，减少粒子数量
+            Location particleLoc = loc.clone().add(0, y - startY, 0);
 
             loc.getWorld().spawnParticle(
                 Particle.END_ROD,

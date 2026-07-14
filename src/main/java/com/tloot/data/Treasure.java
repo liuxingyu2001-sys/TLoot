@@ -6,10 +6,12 @@ import org.bukkit.World;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class Treasure {
 
@@ -43,7 +45,7 @@ public class Treasure {
         this.commands = commands != null ? new ArrayList<>(commands) : new ArrayList<>();
         this.createTime = createTime;
         this.expireTime = expireTime;
-        this.participants = new ArrayList<>();
+        this.participants = new CopyOnWriteArrayList<>();  // 线程安全
     }
 
     public String getId() {
@@ -101,6 +103,9 @@ public class Treasure {
 
     public String getRemainingTimeFormatted() {
         long remaining = getRemainingTime();
+        if (remaining == 0) {
+            return "即将过期";
+        }
         long hours = remaining / (1000 * 60 * 60);
         long minutes = (remaining % (1000 * 60 * 60)) / (1000 * 60);
         return hours + "小时" + minutes + "分钟";
@@ -217,6 +222,7 @@ public class Treasure {
         if (value instanceof Number) {
             return ((Number) value).longValue();
         }
-        return System.currentTimeMillis();
+        // 数据损坏时返回0，避免使用当前时间导致错误的过期时间
+        return 0L;
     }
 }

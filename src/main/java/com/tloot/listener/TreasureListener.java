@@ -35,7 +35,7 @@ public class TreasureListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBlockBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
-        if (block.getType() == Material.CHEST && findTreasureAtLocation(block.getLocation()) != null) {
+        if (block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null) {
             event.setCancelled(true);
             event.getPlayer().sendMessage(plugin.getMessageManager().get("prefix") + "§c这个宝藏箱子不能被破坏！");
         }
@@ -44,14 +44,14 @@ public class TreasureListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onEntityExplode(EntityExplodeEvent event) {
         event.blockList().removeIf(block ->
-            block.getType() == Material.CHEST && findTreasureAtLocation(block.getLocation()) != null
+            block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null
         );
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBlockExplode(BlockExplodeEvent event) {
         event.blockList().removeIf(block ->
-            block.getType() == Material.CHEST && findTreasureAtLocation(block.getLocation()) != null
+            block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null
         );
     }
 
@@ -106,8 +106,8 @@ public class TreasureListener implements Listener {
     }
 
     private boolean handleChestClick(Player player, Block chestBlock, PlayerInteractEvent event) {
-        Treasure treasure = findTreasureAtLocation(chestBlock.getLocation());
-        
+        Treasure treasure = plugin.getTreasureManager().findTreasureAtLocation(chestBlock.getLocation());
+
         if (treasure == null) {
             return false;
         }
@@ -127,23 +127,6 @@ public class TreasureListener implements Listener {
         event.setCancelled(true);
         claimTreasure(player, treasure, chestBlock);
         return true;
-    }
-
-    private Treasure findTreasureAtLocation(Location location) {
-        TreasureManager treasureManager = plugin.getTreasureManager();
-        
-        for (Treasure treasure : treasureManager.getAllTreasures()) {
-            Location treasureLoc = treasure.getLocation();
-            if (treasureLoc != null && treasureLoc.getWorld() != null && 
-                treasureLoc.getWorld().equals(location.getWorld()) &&
-                treasureLoc.getBlockX() == location.getBlockX() &&
-                treasureLoc.getBlockY() == location.getBlockY() &&
-                treasureLoc.getBlockZ() == location.getBlockZ()) {
-                return treasure;
-            }
-        }
-        
-        return null;
     }
 
     private void claimTreasure(Player player, Treasure treasure, Block chestBlock) {

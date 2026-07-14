@@ -100,9 +100,41 @@ public class CompassGUIListener implements Listener {
 
         // 宝藏物品 - 通过 display name 解析 ID
         if (displayName.startsWith(ChatColor.GREEN + "宝藏 #")) {
-            String treasureId = displayName.substring((ChatColor.GREEN + "宝藏 #").length()).trim();
-            handleClaimCompass(player, treasureId);
+            String treasureId = extractTreasureId(displayName);
+            if (treasureId != null && !treasureId.isEmpty()) {
+                handleClaimCompass(player, treasureId);
+            }
         }
+    }
+
+    private String extractTreasureId(String displayName) {
+        // 从显示名称中提取宝藏ID，格式: "§a宝藏 #XXXXXXXX"
+        try {
+            int hashIndex = displayName.indexOf("#");
+            if (hashIndex == -1) {
+                return null;
+            }
+            // 提取从 # 后面到颜色代码或结尾的字符串
+            String afterHash = displayName.substring(hashIndex + 1).trim();
+            // 查找下一个颜色代码（如果有）
+            int colorIndex = -1;
+            for (int i = 0; i < afterHash.length(); i++) {
+                if (afterHash.charAt(i) == '§' && i + 1 < afterHash.length()) {
+                    colorIndex = i;
+                    break;
+                }
+            }
+            if (colorIndex > 0) {
+                afterHash = afterHash.substring(0, colorIndex).trim();
+            }
+            // 宝藏ID是8位大写字母/数字
+            if (afterHash.length() >= 8) {
+                return afterHash.substring(0, 8).toUpperCase();
+            }
+        } catch (Exception e) {
+            plugin.getLogger().warning("解析宝藏ID失败: " + displayName);
+        }
+        return null;
     }
 
     private void handleClaimCompass(Player player, String treasureId) {

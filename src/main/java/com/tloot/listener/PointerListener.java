@@ -91,11 +91,14 @@ public class PointerListener implements Listener {
         }
 
         ItemStack pointer = player.getInventory().getItemInMainHand();
-        long now = System.currentTimeMillis();
-        Long lastUpdate = lastLoreUpdate.get(player.getUniqueId());
-        if (lastUpdate == null || now - lastUpdate >= LORE_UPDATE_INTERVAL) {
-            PointerItem.updatePointerLore(pointer, treasure);
-            lastLoreUpdate.put(player.getUniqueId(), now);
+        if (PointerItem.isPointer(pointer)) {  // 添加检查
+            long now = System.currentTimeMillis();
+            Long lastUpdate = lastLoreUpdate.get(player.getUniqueId());
+            if (lastUpdate == null || now - lastUpdate >= LORE_UPDATE_INTERVAL) {
+                PointerItem.updatePointerLore(pointer, treasure);
+                player.getInventory().setItemInMainHand(pointer);  // 同步回背包
+                lastLoreUpdate.put(player.getUniqueId(), now);
+            }
         }
     }
 

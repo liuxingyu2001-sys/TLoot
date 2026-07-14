@@ -705,6 +705,7 @@ public class GUIManager {
 
         if (ticketPrice < minTicketPrice) {
             ticketPrice = minTicketPrice;
+            setTicketPrice(player.getUniqueId(), ticketPrice);  // 修复：同步更新存储的值
         }
 
         ItemStack sign = TreasureSignItem.createSign(guaranteedCoins, ticketPrice);
