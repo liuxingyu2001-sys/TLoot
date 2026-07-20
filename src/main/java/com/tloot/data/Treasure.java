@@ -130,7 +130,11 @@ public class Treasure {
         data.put("id", id);
         data.put("ownerUuid", ownerUuid.toString());
         data.put("ownerName", ownerName);
-        data.put("world", location.getWorld().getName());
+        World world = location.getWorld();
+        if (world == null) {
+            return new HashMap<>(); // 世界已卸载，跳过此宝藏
+        }
+        data.put("world", world.getName());
         data.put("x", location.getX());
         data.put("y", location.getY());
         data.put("z", location.getZ());

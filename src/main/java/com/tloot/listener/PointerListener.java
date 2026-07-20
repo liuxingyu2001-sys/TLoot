@@ -68,7 +68,7 @@ public class PointerListener implements Listener {
         Location playerLoc = player.getLocation();
         Location treasureLoc = treasure.getLocation();
 
-        if (playerLoc.getWorld().equals(treasureLoc.getWorld())) {
+        if (treasureLoc.getWorld() != null && playerLoc.getWorld().equals(treasureLoc.getWorld())) {
             String currentTarget = activeCompassTarget.get(player.getUniqueId());
             if (currentTarget == null || !currentTarget.equals(treasure.getId())) {
                 player.setCompassTarget(treasureLoc);
