@@ -13,6 +13,10 @@ import com.tloot.listener.gui.MyTreasureGUIListener;
 import com.tloot.listener.PointerListener;
 import com.tloot.listener.TreasureListener;
 import com.tloot.listener.TreasureSignListener;
+import com.tloot.storage.MySQLStorage;
+import com.tloot.storage.StorageBackend;
+import com.tloot.storage.YamlStorage;
+import com.tloot.sync.RedisSyncManager;
 import com.tloot.task.AutoTreasureTask;
 import com.tloot.task.TreasureExpireTask;
 import net.milkbowl.vault.economy.Economy;
@@ -30,6 +34,8 @@ public class TLoot extends JavaPlugin {
     private BeaconEffectManager beaconEffectManager;
     private TreasureExpireTask expireTask;
     private AutoTreasureTask autoTreasureTask;
+    private StorageBackend storageBackend;
+    private RedisSyncManager redisSyncManager;
 
     @Override
     public void onEnable() {
@@ -47,7 +53,27 @@ public class TLoot extends JavaPlugin {
         messageManager = new MessageManager(this);
         messageManager.loadMessages();
 
+        storageBackend = createStorageBackend();
+        storageBackend.init();
+
         treasureManager = new TreasureManager(this);
+        treasureManager.setStorage(storageBackend);
+
+        if (storageBackend instanceof YamlStorage yamlStorage) {
+            yamlStorage.setTreasuresSupplier(() -> treasureManager.getAllTreasures());
+        }
+
+        if (configManager.isRedisEnabled()) {
+            redisSyncManager = new RedisSyncManager(this,
+                    configManager.getRedisHost(),
+                    configManager.getRedisPort(),
+                    configManager.getRedisPassword(),
+                    configManager.getRedisChannel(),
+                    configManager.getRedisServerId());
+            treasureManager.setSyncManager(redisSyncManager);
+            redisSyncManager.init(treasureManager);
+        }
+
         treasureManager.loadTreasures();
 
         guiManager = new GUIManager(this);
@@ -75,13 +101,13 @@ public class TLoot extends JavaPlugin {
         if (configManager.isAutoTreasureEnabled()) {
             autoTreasureTask = new AutoTreasureTask(this);
             long intervalTicks = configManager.getAutoTreasureInterval() * 60L * 20L;
-            // 首次延迟 20 秒快速生成，之后按配置间隔
             long initialDelay = 20L * 20L;
             autoTreasureTask.runTaskTimer(this, initialDelay, intervalTicks);
             getLogger().info("定时自动寻宝已启用，间隔: " + configManager.getAutoTreasureInterval() + " 分钟（首次 " + (initialDelay / 20) + " 秒后生成）");
         }
 
-        getLogger().info("TLoot 寻宝插件已启用！");
+        getLogger().info("TLoot 寻宝插件已启用！存储: " + configManager.getStorageType()
+                + (configManager.isRedisEnabled() ? ", Redis跨服同步: 已启用" : ""));
     }
 
     @Override
@@ -98,7 +124,28 @@ public class TLoot extends JavaPlugin {
         if (treasureManager != null) {
             treasureManager.saveTreasures();
         }
+        if (redisSyncManager != null) {
+            redisSyncManager.shutdown();
+        }
+        if (storageBackend != null) {
+            storageBackend.close();
+        }
         getLogger().info("TLoot 寻宝插件已禁用！");
+    }
+
+    private StorageBackend createStorageBackend() {
+        String type = configManager.getStorageType();
+        if ("mysql".equalsIgnoreCase(type)) {
+            return new MySQLStorage(this,
+                    configManager.getDatabaseHost(),
+                    configManager.getDatabasePort(),
+                    configManager.getDatabaseName(),
+                    configManager.getDatabaseUsername(),
+                    configManager.getDatabasePassword(),
+                    configManager.getDatabaseTablePrefix(),
+                    configManager.getDatabasePoolSize());
+        }
+        return new YamlStorage(this);
     }
 
     private boolean setupEconomy() {
@@ -135,5 +182,9 @@ public class TLoot extends JavaPlugin {
 
     public GUIManager getGuiManager() {
         return guiManager;
+    }
+
+    public RedisSyncManager getRedisSyncManager() {
+        return redisSyncManager;
     }
 }

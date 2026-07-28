@@ -119,8 +119,7 @@ public class TreasureCommand implements CommandExecutor, TabCompleter {
         }
 
         economy.withdrawPlayer(player, ticketPrice);
-        treasure.addParticipant(player.getUniqueId());
-        treasureManager.saveTreasures();
+        treasureManager.addParticipant(treasure.getId(), player.getUniqueId());
 
         player.getInventory().addItem(PointerItem.createPointer(treasure));
         

@@ -244,4 +244,66 @@ public class ConfigManager {
     public int[] getAutoTreasureWorldRange(String worldName) {
         return autoTreasureWorldRanges.get(worldName);
     }
+
+    // ==================== 存储设置 ====================
+
+    public String getStorageType() {
+        return config.getString("storage.type", "yaml");
+    }
+
+    // ==================== 数据库设置 ====================
+
+    public String getDatabaseHost() {
+        return config.getString("database.host", "localhost");
+    }
+
+    public int getDatabasePort() {
+        return config.getInt("database.port", 3306);
+    }
+
+    public String getDatabaseName() {
+        return config.getString("database.database", "tloot");
+    }
+
+    public String getDatabaseUsername() {
+        return config.getString("database.username", "root");
+    }
+
+    public String getDatabasePassword() {
+        return config.getString("database.password", "");
+    }
+
+    public String getDatabaseTablePrefix() {
+        return config.getString("database.table-prefix", "tloot_");
+    }
+
+    public int getDatabasePoolSize() {
+        return config.getInt("database.pool-size", 10);
+    }
+
+    // ==================== Redis 设置 ====================
+
+    public boolean isRedisEnabled() {
+        return config.getBoolean("redis.enabled", false);
+    }
+
+    public String getRedisHost() {
+        return config.getString("redis.host", "localhost");
+    }
+
+    public int getRedisPort() {
+        return config.getInt("redis.port", 6379);
+    }
+
+    public String getRedisPassword() {
+        return config.getString("redis.password", "");
+    }
+
+    public String getRedisChannel() {
+        return config.getString("redis.channel", "tloot:sync");
+    }
+
+    public String getRedisServerId() {
+        return config.getString("redis.server-id", "");
+    }
 }

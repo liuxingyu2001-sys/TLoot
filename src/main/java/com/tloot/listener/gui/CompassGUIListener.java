@@ -181,8 +181,7 @@ public class CompassGUIListener implements Listener {
         }
 
         economy.withdrawPlayer(player, ticketPrice);
-        treasure.addParticipant(uuid);
-        plugin.getTreasureManager().saveTreasures();
+        plugin.getTreasureManager().addParticipant(treasureId, uuid);
 
         player.getInventory().addItem(PointerItem.createPointer(treasure));
         player.closeInventory();

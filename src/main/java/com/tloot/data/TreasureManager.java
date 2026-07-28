@@ -1,100 +1,84 @@
 package com.tloot.data;
 
 import com.tloot.TLoot;
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
+import com.tloot.storage.StorageBackend;
+import com.tloot.sync.RedisSyncManager;
+import net.md_5.bungee.api.chat.ClickEvent;
+import net.md_5.bungee.api.chat.ComponentBuilder;
+import net.md_5.bungee.api.chat.HoverEvent;
+import net.md_5.bungee.api.chat.TextComponent;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.entity.Player;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class TreasureManager {
+public class TreasureManager implements RedisSyncManager.SyncCallback {
 
     private final TLoot plugin;
-    private final File dataFile;
     private final Map<String, Treasure> treasures;
     private final Map<UUID, String> playerCreatingTreasure;
-    private final Map<String, String> locationIndex;  // 位置到宝藏ID的索引
+    private final Map<String, String> locationIndex;
+
+    private StorageBackend storage;
+    private RedisSyncManager syncManager;
 
     public TreasureManager(TLoot plugin) {
         this.plugin = plugin;
-        this.dataFile = new File(plugin.getDataFolder(), "data.yml");
         this.treasures = new ConcurrentHashMap<>();
         this.playerCreatingTreasure = new ConcurrentHashMap<>();
         this.locationIndex = new ConcurrentHashMap<>();
     }
 
+    public void setStorage(StorageBackend storage) {
+        this.storage = storage;
+    }
+
+    public void setSyncManager(RedisSyncManager syncManager) {
+        this.syncManager = syncManager;
+    }
+
     public void loadTreasures() {
-        if (!dataFile.exists()) {
+        if (storage == null) {
             return;
         }
-
-        FileConfiguration dataConfig = YamlConfiguration.loadConfiguration(dataFile);
-        ConfigurationSection treasuresSection = dataConfig.getConfigurationSection("treasures");
-
-        if (treasuresSection == null) {
-            return;
-        }
-
+        Map<String, Treasure> loaded = storage.loadAll();
+        treasures.clear();
         locationIndex.clear();
-
-        for (String id : treasuresSection.getKeys(false)) {
-            ConfigurationSection treasureSection = treasuresSection.getConfigurationSection(id);
-            if (treasureSection != null) {
-                Map<String, Object> data = new HashMap<>();
-                for (String key : treasureSection.getKeys(false)) {
-                    data.put(key, treasureSection.get(key));
-                }
-                Treasure treasure = Treasure.deserialize(data);
-                if (treasure != null && !treasure.isExpired()) {
-                    treasures.put(id, treasure);
-                    // 添加位置索引
-                    locationIndex.put(locationToKey(treasure.getLocation()), id);
-                }
-            }
+        treasures.putAll(loaded);
+        for (Map.Entry<String, Treasure> entry : loaded.entrySet()) {
+            locationIndex.put(entry.getValue().getLocationKey(), entry.getKey());
         }
+        plugin.getLogger().info("已加载 " + treasures.size() + " 个宝藏");
     }
 
     public void saveTreasures() {
-        FileConfiguration dataConfig = new YamlConfiguration();
-        
-        for (Map.Entry<String, Treasure> entry : treasures.entrySet()) {
-            String path = "treasures." + entry.getKey();
-            Map<String, Object> data = entry.getValue().serialize();
-            for (Map.Entry<String, Object> dataEntry : data.entrySet()) {
-                dataConfig.set(path + "." + dataEntry.getKey(), dataEntry.getValue());
-            }
-        }
-
-        try {
-            dataConfig.save(dataFile);
-        } catch (IOException e) {
-            plugin.getLogger().severe("无法保存宝藏数据: " + e.getMessage());
+        if (storage != null) {
+            storage.saveAll(treasures.values());
         }
     }
 
-    public Treasure createTreasure(UUID ownerUuid, String ownerName, 
-                                    org.bukkit.Location location, 
-                                    int guaranteedCoins, 
+    public Treasure createTreasure(UUID ownerUuid, String ownerName,
+                                    org.bukkit.Location location,
+                                    int guaranteedCoins,
                                     int ticketPrice,
                                     List<org.bukkit.inventory.ItemStack> items) {
         return createTreasure(ownerUuid, ownerName, location, guaranteedCoins, ticketPrice, items, null);
     }
 
-    public Treasure createTreasure(UUID ownerUuid, String ownerName, 
-                                    org.bukkit.Location location, 
-                                    int guaranteedCoins, 
+    public Treasure createTreasure(UUID ownerUuid, String ownerName,
+                                    org.bukkit.Location location,
+                                    int guaranteedCoins,
                                     int ticketPrice,
                                     List<org.bukkit.inventory.ItemStack> items,
                                     List<String> commands) {
         return createTreasure(ownerUuid, ownerName, location, guaranteedCoins, ticketPrice, items, commands, plugin.getConfigManager().getExpireTime());
     }
 
-    /**
-     * 创建宝藏，使用自定义过期时间（供系统自动寻宝使用）
-     */
     public Treasure createTreasure(UUID ownerUuid, String ownerName,
                                     org.bukkit.Location location,
                                     int guaranteedCoins,
@@ -107,8 +91,14 @@ public class TreasureManager {
         Treasure treasure = new Treasure(id, ownerUuid, ownerName, location,
                                          guaranteedCoins, ticketPrice, items, commands, expireTimeMillis, System.currentTimeMillis());
         treasures.put(id, treasure);
-        locationIndex.put(locationToKey(location), id);
-        saveTreasures();
+        locationIndex.put(treasure.getLocationKey(), id);
+
+        if (storage != null) {
+            storage.save(treasure);
+        }
+        if (syncManager != null) {
+            syncManager.publishCreate(treasure);
+        }
 
         return treasure;
     }
@@ -116,26 +106,155 @@ public class TreasureManager {
     public void removeTreasure(String id) {
         Treasure treasure = treasures.remove(id);
         if (treasure != null) {
-            locationIndex.remove(locationToKey(treasure.getLocation()));
+            locationIndex.remove(treasure.getLocationKey());
         }
-        saveTreasures();
+        if (storage != null) {
+            storage.delete(id);
+        }
+        if (syncManager != null) {
+            syncManager.publishRemove(id);
+        }
     }
 
-    private String locationToKey(org.bukkit.Location location) {
-        if (location == null || location.getWorld() == null) {
-            return null;
+    public void claimTreasure(String id, String claimerName) {
+        Treasure treasure = treasures.remove(id);
+        if (treasure != null) {
+            locationIndex.remove(treasure.getLocationKey());
         }
-        return location.getWorld().getName() + "," +
-               location.getBlockX() + "," +
-               location.getBlockY() + "," +
-               location.getBlockZ();
+        if (storage != null) {
+            storage.delete(id);
+        }
+        if (syncManager != null) {
+            String ownerName = treasure != null ? treasure.getOwnerName() : "未知";
+            syncManager.publishClaim(id, claimerName, ownerName);
+        }
     }
+
+    public void expireTreasure(String id) {
+        Treasure treasure = treasures.remove(id);
+        if (treasure != null) {
+            locationIndex.remove(treasure.getLocationKey());
+        }
+        if (storage != null) {
+            storage.delete(id);
+        }
+        if (syncManager != null) {
+            syncManager.publishExpire(id);
+        }
+    }
+
+    public void addParticipant(String treasureId, UUID participantUuid) {
+        Treasure treasure = treasures.get(treasureId);
+        if (treasure != null) {
+            treasure.addParticipant(participantUuid);
+            if (storage != null) {
+                storage.save(treasure);
+            }
+            if (syncManager != null) {
+                syncManager.publishJoin(treasureId, participantUuid);
+            }
+        }
+    }
+
+    // ==================== Redis 同步回调（来自其他服务器） ====================
+
+    @Override
+    public void onTreasureCreated(Treasure treasure) {
+        treasures.put(treasure.getId(), treasure);
+        locationIndex.put(treasure.getLocationKey(), treasure.getId());
+
+        String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
+        boolean isSystem = treasure.getOwnerUuid().equals(com.tloot.task.AutoTreasureTask.SYSTEM_OWNER_UUID);
+
+        for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+            if (!isSystem && onlinePlayer.getUniqueId().equals(treasure.getOwnerUuid())) {
+                continue;
+            }
+
+            TextComponent message;
+            if (isSystem) {
+                message = new TextComponent(
+                        plugin.getMessageManager().get("prefix") +
+                        ChatColor.GOLD + "【系统寻宝】" +
+                        ChatColor.GREEN + "一个新的宝藏出现了！ " +
+                        ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins() + " " +
+                        ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + treasure.getTicketPrice() + " " +
+                        ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName
+                );
+            } else {
+                message = new TextComponent(
+                        plugin.getMessageManager().get("prefix") +
+                        ChatColor.GREEN + " " + treasure.getOwnerName() + " 发起了一个寻宝！ " +
+                        ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins() + " " +
+                        ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + treasure.getTicketPrice() + " " +
+                        ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName
+                );
+            }
+            message.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/treasure join " + treasure.getId()));
+            message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                    new ComponentBuilder(ChatColor.GREEN + "点击参与此寻宝").create()));
+
+            onlinePlayer.spigot().sendMessage(message);
+        }
+    }
+
+    @Override
+    public void onTreasureRemoved(String treasureId) {
+        Treasure treasure = treasures.remove(treasureId);
+        if (treasure != null) {
+            locationIndex.remove(treasure.getLocationKey());
+        }
+    }
+
+    @Override
+    public void onTreasureClaimed(String treasureId, String claimerName, String ownerName) {
+        Treasure treasure = treasures.remove(treasureId);
+        if (treasure != null) {
+            locationIndex.remove(treasure.getLocationKey());
+        }
+        plugin.getServer().broadcastMessage(
+                plugin.getMessageManager().get("prefix") +
+                "§e" + claimerName + " §a找到了 §e" + ownerName + " §a发起的宝藏！"
+        );
+    }
+
+    @Override
+    public void onTreasureExpired(String treasureId) {
+        Treasure treasure = treasures.remove(treasureId);
+        if (treasure != null) {
+            locationIndex.remove(treasure.getLocationKey());
+
+            Player owner = Bukkit.getPlayer(treasure.getOwnerUuid());
+            if (owner != null) {
+                owner.sendMessage(ChatColor.RED + "你的宝藏 #" + treasureId + " 已过期！");
+            }
+            for (UUID participantUuid : treasure.getParticipants()) {
+                Player participant = Bukkit.getPlayer(participantUuid);
+                if (participant != null) {
+                    participant.sendMessage(ChatColor.RED + "宝藏 #" + treasureId + " 已过期！");
+                }
+            }
+        }
+    }
+
+    @Override
+    public void onPlayerJoined(String treasureId, UUID participantUuid) {
+        Treasure treasure = treasures.get(treasureId);
+        if (treasure != null) {
+            treasure.addParticipant(participantUuid);
+        }
+    }
+
+    // ==================== 查询方法 ====================
 
     public Treasure findTreasureAtLocation(org.bukkit.Location location) {
         if (location == null || location.getWorld() == null) {
             return null;
         }
-        String key = locationToKey(location);
+        String key = location.getWorld().getName() + "," +
+                     location.getBlockX() + "," +
+                     location.getBlockY() + "," +
+                     location.getBlockZ();
         String id = locationIndex.get(key);
         return id != null ? treasures.get(id) : null;
     }
@@ -178,6 +297,8 @@ public class TreasureManager {
         return participating;
     }
 
+    // ==================== 创建流程状态 ====================
+
     public void setPlayerCreatingTreasure(UUID playerUuid, String treasureId) {
         playerCreatingTreasure.put(playerUuid, treasureId);
     }
@@ -206,13 +327,18 @@ public class TreasureManager {
                 toRemove.add(entry.getKey());
             }
         }
-        
+
         for (String id : toRemove) {
-            treasures.remove(id);
-        }
-        
-        if (!toRemove.isEmpty()) {
-            saveTreasures();
+            Treasure treasure = treasures.remove(id);
+            if (treasure != null) {
+                locationIndex.remove(treasure.getLocationKey());
+            }
+            if (storage != null) {
+                storage.delete(id);
+            }
+            if (syncManager != null) {
+                syncManager.publishExpire(id);
+            }
         }
     }
 }

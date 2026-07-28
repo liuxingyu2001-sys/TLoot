@@ -2,6 +2,32 @@
 # TLoot 寻宝插件配置文件
 # ====================
 
+# 数据存储设置
+# 多端部署时务必使用 mysql，yaml 仅适合单服
+storage:
+  # 存储类型: yaml 或 mysql
+  type: yaml
+
+# MySQL 数据库设置（仅 storage.type 为 mysql 时生效）
+database:
+  host: localhost
+  port: 3306
+  database: tloot
+  username: root
+  password: ""
+  table-prefix: tloot_
+  pool-size: 10
+
+# Redis 跨服同步设置（多端部署时启用）
+redis:
+  enabled: false
+  host: localhost
+  port: 6379
+  password: ""
+  channel: "tloot:sync"
+  # 服务器ID，用于区分不同子服（留空则自动生成）
+  server-id: ""
+
 settings:
   # 参与寻宝需要支付的门票金额（金币）
   ticket-price: 500

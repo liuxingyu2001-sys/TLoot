@@ -96,7 +96,7 @@ public class TreasureListener implements Listener {
 
         if (treasure.isExpired()) {
             player.sendMessage(plugin.getMessageManager().get("expire.treasure-expired"));
-            plugin.getTreasureManager().removeTreasure(treasureId);
+            plugin.getTreasureManager().expireTreasure(treasureId);
             item.setAmount(0);
             return;
         }
@@ -114,7 +114,7 @@ public class TreasureListener implements Listener {
 
         if (treasure.isExpired()) {
             player.sendMessage(ChatColor.RED + "这个宝藏已经过期了！");
-            plugin.getTreasureManager().removeTreasure(treasure.getId());
+            plugin.getTreasureManager().expireTreasure(treasure.getId());
             return false;
         }
 
@@ -141,7 +141,7 @@ public class TreasureListener implements Listener {
             player.getInventory().addItem(item);
         }
 
-        treasureManager.removeTreasure(treasure.getId());
+        treasureManager.claimTreasure(treasure.getId(), player.getName());
 
         chestBlock.setType(Material.AIR);
 

@@ -35,8 +35,6 @@ public class TreasureExpireTask extends BukkitRunnable {
         }
         
         treasureManager.cleanupExpiredTreasures();
-        
-        treasureManager.saveTreasures();
     }
 
     private void handleExpiredTreasure(Treasure treasure) {

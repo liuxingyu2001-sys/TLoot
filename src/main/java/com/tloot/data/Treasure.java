@@ -6,7 +6,6 @@ import org.bukkit.World;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +17,7 @@ public class Treasure {
     private final String id;
     private final UUID ownerUuid;
     private final String ownerName;
+    private final String worldName;
     private final Location location;
     private final int guaranteedCoins;
     private final int ticketPrice;
@@ -35,9 +35,18 @@ public class Treasure {
     public Treasure(String id, UUID ownerUuid, String ownerName, Location location,
                     int guaranteedCoins, int ticketPrice, List<ItemStack> items, List<String> commands,
                     long expireTime, long createTime) {
+        this(id, ownerUuid, ownerName,
+                location.getWorld() != null ? location.getWorld().getName() : "unknown",
+                location, guaranteedCoins, ticketPrice, items, commands, expireTime, createTime);
+    }
+
+    public Treasure(String id, UUID ownerUuid, String ownerName, String worldName, Location location,
+                    int guaranteedCoins, int ticketPrice, List<ItemStack> items, List<String> commands,
+                    long expireTime, long createTime) {
         this.id = id;
         this.ownerUuid = ownerUuid;
         this.ownerName = ownerName;
+        this.worldName = worldName;
         this.location = location;
         this.guaranteedCoins = guaranteedCoins;
         this.ticketPrice = ticketPrice;
@@ -45,7 +54,7 @@ public class Treasure {
         this.commands = commands != null ? new ArrayList<>(commands) : new ArrayList<>();
         this.createTime = createTime;
         this.expireTime = expireTime;
-        this.participants = new CopyOnWriteArrayList<>();  // 线程安全
+        this.participants = new CopyOnWriteArrayList<>();
     }
 
     public String getId() {
@@ -63,15 +72,19 @@ public class Treasure {
     public Location getLocation() {
         return location;
     }
-    
+
     public String getWorldName() {
-        return location.getWorld() != null ? location.getWorld().getName() : "未知世界";
+        return worldName;
+    }
+
+    public boolean isWorldLoaded() {
+        return location.getWorld() != null;
     }
 
     public int getGuaranteedCoins() {
         return guaranteedCoins;
     }
-    
+
     public int getTicketPrice() {
         return ticketPrice;
     }
@@ -125,16 +138,16 @@ public class Treasure {
         return participants.contains(uuid);
     }
 
+    public String getLocationKey() {
+        return worldName + "," + location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ();
+    }
+
     public Map<String, Object> serialize() {
         Map<String, Object> data = new HashMap<>();
         data.put("id", id);
         data.put("ownerUuid", ownerUuid.toString());
         data.put("ownerName", ownerName);
-        World world = location.getWorld();
-        if (world == null) {
-            return new HashMap<>(); // 世界已卸载，跳过此宝藏
-        }
-        data.put("world", world.getName());
+        data.put("world", worldName);
         data.put("x", location.getX());
         data.put("y", location.getY());
         data.put("z", location.getZ());
@@ -142,7 +155,7 @@ public class Treasure {
         data.put("ticketPrice", ticketPrice);
         data.put("createTime", createTime);
         data.put("expireTime", expireTime);
-        
+
         List<Map<String, Object>> itemsData = new ArrayList<>();
         for (int i = 0; i < items.size(); i++) {
             Map<String, Object> itemData = new HashMap<>();
@@ -168,10 +181,8 @@ public class Treasure {
         String id = (String) data.get("id");
         UUID ownerUuid = UUID.fromString((String) data.get("ownerUuid"));
         String ownerName = (String) data.get("ownerName");
-        World world = Bukkit.getWorld((String) data.get("world"));
-        if (world == null) {
-            return null;
-        }
+        String worldName = (String) data.get("world");
+        World world = Bukkit.getWorld(worldName);
         double x = toDouble(data.get("x"));
         double y = toDouble(data.get("y"));
         double z = toDouble(data.get("z"));
@@ -196,7 +207,8 @@ public class Treasure {
             commands = new ArrayList<>();
         }
 
-        Treasure treasure = new Treasure(id, ownerUuid, ownerName, location, guaranteedCoins, ticketPrice, items, commands, expireTime, createTime);
+        Treasure treasure = new Treasure(id, ownerUuid, ownerName, worldName, location,
+                guaranteedCoins, ticketPrice, items, commands, expireTime, createTime);
 
         List<String> participantsData = (List<String>) data.get("participants");
         if (participantsData != null) {
@@ -226,7 +238,6 @@ public class Treasure {
         if (value instanceof Number) {
             return ((Number) value).longValue();
         }
-        // 数据损坏时返回0，避免使用当前时间导致错误的过期时间
         return 0L;
     }
 }
