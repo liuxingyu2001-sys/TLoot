@@ -45,16 +45,19 @@
             <groupId>com.zaxxer</groupId>
             <artifactId>HikariCP</artifactId>
             <version>5.1.0</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
             <version>8.3.0</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>redis.clients</groupId>
             <artifactId>jedis</artifactId>
             <version>5.1.0</version>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 
@@ -68,39 +71,6 @@
                 <configuration>
                     <source>${java.version}</source>
                     <target>${java.version}</target>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.1</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                    </execution>
-                </executions>
-                <configuration>
-                    <relocations>
-                        <relocation>
-                            <pattern>com.zaxxer.hikari</pattern>
-                            <shadedPattern>com.tloot.libs.hikari</shadedPattern>
-                        </relocation>
-                        <relocation>
-                            <pattern>com.mysql</pattern>
-                            <shadedPattern>com.tloot.libs.mysql</shadedPattern>
-                        </relocation>
-                        <relocation>
-                            <pattern>redis.clients.jedis</pattern>
-                            <shadedPattern>com.tloot.libs.jedis</shadedPattern>
-                        </relocation>
-                        <relocation>
-                            <pattern>org.apache.commons.pool2</pattern>
-                            <shadedPattern>com.tloot.libs.pool2</shadedPattern>
-                        </relocation>
-                    </relocations>
                 </configuration>
             </plugin>
         </plugins>

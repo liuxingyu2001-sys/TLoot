@@ -8,6 +8,11 @@ depend:
   - Vault
 softdepend: []
 
+libraries:
+  - com.zaxxer:HikariCP:5.1.0
+  - com.mysql:mysql-connector-j:8.3.0
+  - redis.clients:jedis:5.1.0
+
 commands:
   treasure:
     description: 寻宝系统主命令
