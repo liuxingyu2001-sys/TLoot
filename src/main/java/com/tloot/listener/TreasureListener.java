@@ -101,6 +101,11 @@ public class TreasureListener implements Listener {
             return;
         }
 
+        if (!treasure.isWorldLoaded()) {
+            player.sendMessage(ChatColor.RED + "该宝藏所在世界当前不可用！");
+            return;
+        }
+
         event.setCancelled(true);
         player.setCompassTarget(treasure.getLocation());
     }
