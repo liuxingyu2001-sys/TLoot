@@ -15,7 +15,6 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
 import org.bukkit.block.Block;
-import org.bukkit.block.Chest;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -126,11 +125,8 @@ public class AutoTreasureTask extends BukkitRunnable {
 
         Block block = chestLoc.getBlock();
         block.setType(Material.CHEST);
-
-        Chest chest = (Chest) block.getState();
-        for (ItemStack item : loot) {
-            chest.getInventory().addItem(item);
-        }
+        // 奖励物品只保存在 Treasure 记录中，不物理放入箱子：
+        // 否则领取/过期移除箱子时物品会洒落在地上造成重复发放，且可被漏斗抽走
 
         TreasureManager treasureManager = plugin.getTreasureManager();
         // 使用系统宝藏专属的过期时间
@@ -243,7 +239,13 @@ public class AutoTreasureTask extends BukkitRunnable {
     }
 
     private void generateRewards(List<ItemStack> loot, List<String> commands) {
-        List<LootEntry> lootTable = plugin.getConfigManager().getLootTable();
+        // 过滤权重 <= 0 的条目，避免 totalWeight 为 0 时 random.nextInt(0) 抛异常导致定时任务被取消
+        List<LootEntry> lootTable = new ArrayList<>();
+        for (LootEntry entry : plugin.getConfigManager().getLootTable()) {
+            if (entry.getWeight() > 0) {
+                lootTable.add(entry);
+            }
+        }
         if (lootTable.isEmpty()) {
             return;
         }

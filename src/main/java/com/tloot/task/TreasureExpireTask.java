@@ -9,6 +9,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.Chest;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -45,6 +46,10 @@ public class TreasureExpireTask extends BukkitRunnable {
 
             Block block = loc.getBlock();
             if (block.getType() == Material.CHEST) {
+                // 先清空箱内物理物品再移除，避免物品洒落在地上
+                if (block.getState() instanceof Chest chest) {
+                    chest.getInventory().clear();
+                }
                 block.setType(Material.AIR);
             }
         }

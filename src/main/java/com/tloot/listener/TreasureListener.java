@@ -10,19 +10,23 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.Chest;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockBurnEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.block.BlockIgniteEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
+import java.util.Map;
 
 public class TreasureListener implements Listener {
 
@@ -53,6 +57,22 @@ public class TreasureListener implements Listener {
         event.blockList().removeIf(block ->
             block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null
         );
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onBlockBurn(BlockBurnEvent event) {
+        Block block = event.getBlock();
+        if (block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onBlockIgnite(BlockIgniteEvent event) {
+        Block block = event.getBlock();
+        if (block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null) {
+            event.setCancelled(true);
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -142,13 +162,20 @@ public class TreasureListener implements Listener {
         economy.depositPlayer(player, coins);
 
         List<ItemStack> items = treasure.getItems();
-        for (ItemStack item : items) {
-            player.getInventory().addItem(item);
-        }
+        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(items.toArray(new ItemStack[0]));
 
         treasureManager.claimTreasure(treasure.getId(), player.getName());
 
+        // 先清空箱子内残留的物理物品，再移除箱子，避免物品以掉落物形式洒落（重复发放）
+        if (chestBlock.getState() instanceof Chest chest) {
+            chest.getInventory().clear();
+        }
         chestBlock.setType(Material.AIR);
+
+        // 背包放不下的奖励在领取点附近掉落，确保奖励不丢失
+        for (ItemStack leftover : leftovers.values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), leftover);
+        }
 
         for (ItemStack item : player.getInventory().getContents()) {
             String id = PointerItem.getTreasureId(item);

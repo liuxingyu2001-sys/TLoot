@@ -34,7 +34,7 @@ Minecraft 寻宝插件 — 玩家发起寻宝活动，其他玩家参与争夺�
 
 ## 兼容性
 
-- Paper/Spigot 1.20+
+- Paper/Leaf 26.2+（`api-version: 26.2`，按 paper-api 26.2 编译）
 - Java 21+
 
 ## 安装
