@@ -26,8 +26,10 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -64,6 +66,8 @@ public class MySQLStorage implements StorageBackend {
      * 丢弃旧任务不会丢数据）比让服务器主线程执行 JDBC 写入更安全，同时记录日志便于排查。
      */
     private ExecutorService executor;
+    /** 不可被队列溢出丢弃的任务（删除操作） */
+    private final Set<Runnable> criticalTasks = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
     public MySQLStorage(TLoot plugin, String host, int port, String database,
                         String username, String password, String tablePrefix, int poolSize) {
@@ -84,8 +88,14 @@ public class MySQLStorage implements StorageBackend {
                 new ThreadPoolExecutor.DiscardOldestPolicy() {
                     @Override
                     public void rejectedExecution(Runnable task, ThreadPoolExecutor pool) {
-                        super.rejectedExecution(task, pool);
-                        plugin.getLogger().warning("数据库写入队列已满，丢弃了一条较早的宝藏变更（请检查数据库性能）");
+                        // 丢弃最旧的任务以释放队列空间；但删除类任务必须保留：
+                        // 丢弃一条 delete 会让已被领取/过期的宝藏残留在数据库中，
+                        // 重启后会被重新加载，玩家甚至可能为它再付一次参与费用。
+                        if (dropOldestNonCritical(pool.getQueue())) {
+                            plugin.getLogger().warning("数据库写入队列已满，已丢弃一条较早的宝藏变更（请检查数据库性能）");
+                        } else if (!pool.getQueue().offer(task)) {
+                            plugin.getLogger().severe("数据库写入队列已满且无法丢弃任务，已放弃一条待写入的宝藏变更");
+                        }
                     }
                 });
 
@@ -228,7 +238,7 @@ public class MySQLStorage implements StorageBackend {
             return;
         }
 
-        executor.submit(() -> {
+        executor.submit(critical(() -> {
             String sql = "DELETE FROM " + tablePrefix + "treasures WHERE id = ?";
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -237,7 +247,29 @@ public class MySQLStorage implements StorageBackend {
             } catch (SQLException e) {
                 plugin.getLogger().severe("无法删除宝藏 " + id + ": " + e.getMessage());
             }
-        });
+        }));
+    }
+
+    /**
+     * 标记为不可丢弃的任务。队列满时 {@link #dropOldestNonCritical} 会跳过这些任务，
+     * 保证删除操作最终一定落库（否则重启后已领取的宝藏会"复活"）。
+     * 任务开始执行后即从集合中移除，集合大小始终与队列积压量同阶。
+     */
+    private Runnable critical(Runnable task) {
+        return () -> {
+            criticalTasks.remove(task);
+            task.run();
+        };
+    }
+
+    /** 从队列头部丢弃第一个非关键任务；返回是否成功丢弃 */
+    private boolean dropOldestNonCritical(BlockingQueue<Runnable> queue) {
+        for (Runnable queued : queue) {
+            if (!criticalTasks.contains(queued) && queue.remove(queued)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
