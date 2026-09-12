@@ -52,6 +52,15 @@ pointer:
   # 是否在 ActionBar 显示实时距离
   enable-actionbar: true
 
+  # 宝藏上方的光柱特效
+  beacon:
+    # 是否启用（关闭可显著降低粒子开销）
+    enabled: true
+    # 粒子刷新间隔（tick），20 = 每秒一次
+    interval-ticks: 20
+    # 光柱相对宝藏的最大高度（格）
+    max-height: 80
+
 # 世界白名单 - 只允许在这些世界创建宝藏
 # 如果为空，则允许所有世界
 allowed-worlds:

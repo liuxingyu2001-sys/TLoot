@@ -42,13 +42,11 @@ public class AutoTreasureTask extends BukkitRunnable {
             return;
         }
 
+        int maxActive = Math.max(1, plugin.getConfigManager().getAutoTreasureMaxActive());
         int systemCount = countSystemTreasures();
-        int maxActive = plugin.getConfigManager().getAutoTreasureMaxActive();
-
-        plugin.getLogger().info("[自动寻宝] 当前系统宝藏: " + systemCount + " / 最大: " + maxActive);
 
         if (systemCount >= maxActive) {
-            plugin.getLogger().info("[自动寻宝] 已达上限，跳过本次生成");
+            plugin.getLogger().info("[自动寻宝] 当前系统宝藏 " + systemCount + "/" + maxActive + "，已达上限，跳过本次生成");
             return;
         }
 
@@ -56,13 +54,7 @@ public class AutoTreasureTask extends BukkitRunnable {
     }
 
     private int countSystemTreasures() {
-        int count = 0;
-        for (Treasure t : plugin.getTreasureManager().getAllTreasures()) {
-            if (t.getOwnerUuid().equals(SYSTEM_OWNER_UUID) && !t.isExpired()) {
-                count++;
-            }
-        }
-        return count;
+        return plugin.getTreasureManager().countSystemTreasures();
     }
 
     private void generateTreasure() {
@@ -72,8 +64,6 @@ public class AutoTreasureTask extends BukkitRunnable {
             plugin.getLogger().warning("[自动寻宝] 没有配置可用的世界！请在 config.yml 的 auto-treasure.worlds 中配置");
             return;
         }
-
-        plugin.getLogger().info("[自动寻宝] 可用世界: " + String.join(", ", worlds));
 
         // 随机选世界，优先选已加载的
         List<String> loadedWorlds = new ArrayList<>();
@@ -94,16 +84,12 @@ public class AutoTreasureTask extends BukkitRunnable {
             return; // 不应到达
         }
 
-        plugin.getLogger().info("[自动寻宝] 选中世界: " + worldName + "，正在寻找安全位置...");
-
         int[] range = plugin.getConfigManager().getAutoTreasureWorldRange(worldName);
         Location chestLoc = findSafeLocation(world, range);
         if (chestLoc == null) {
             plugin.getLogger().warning("[自动寻宝] 在 " + worldName + " 中尝试 100 次未找到安全位置（可能区块未生成或地形不合适）");
             return;
         }
-
-        plugin.getLogger().info("[自动寻宝] 找到位置: " + worldName + " (" + chestLoc.getBlockX() + ", " + chestLoc.getBlockY() + ", " + chestLoc.getBlockZ() + ")");
 
         List<ItemStack> loot = new ArrayList<>();
         List<String> commands = new ArrayList<>();
@@ -116,6 +102,13 @@ public class AutoTreasureTask extends BukkitRunnable {
 
         int minCoins = plugin.getConfigManager().getAutoTreasureMinCoins();
         int maxCoins = plugin.getConfigManager().getAutoTreasureMaxCoins();
+        if (maxCoins < minCoins) {
+            plugin.getLogger().warning("[自动寻宝] 保底金币区间配置非法 (min=" + minCoins
+                    + ", max=" + maxCoins + ")，已交换处理");
+            int swapped = minCoins;
+            minCoins = maxCoins;
+            maxCoins = swapped;
+        }
         int guaranteedCoins = minCoins + random.nextInt(maxCoins - minCoins + 1);
         int ticketPrice = plugin.getConfigManager().getAutoTreasureTicketPrice();
         long expireTime = plugin.getConfigManager().getAutoTreasureExpireTime();
@@ -123,23 +116,35 @@ public class AutoTreasureTask extends BukkitRunnable {
         // 强制加载区块，确保方块操作安全
         world.getChunkAt(chestLoc).load(true);
 
-        Block block = chestLoc.getBlock();
-        block.setType(Material.CHEST);
+        TreasureManager treasureManager = plugin.getTreasureManager();
+        if (treasureManager.findTreasureAtLocation(chestLoc) != null) {
+            plugin.getLogger().warning("[自动寻宝] 位置已被其它宝藏占用，跳过本次生成");
+            return;
+        }
+
+        // 先建立宝藏记录，成功后再放置箱子；否则生成失败会留下一个无法领取的"幽灵箱子"
+        Treasure treasure;
+        try {
+            // 使用系统宝藏专属的过期时间
+            treasure = treasureManager.createTreasure(
+                    SYSTEM_OWNER_UUID,
+                    SYSTEM_OWNER_NAME,
+                    chestLoc,
+                    guaranteedCoins,
+                    ticketPrice,
+                    loot,
+                    commands,
+                    expireTime
+            );
+        } catch (Exception e) {
+            plugin.getLogger().severe("[自动寻宝] 创建系统宝藏失败: " + e.getMessage());
+            return;
+        }
+
         // 奖励物品只保存在 Treasure 记录中，不物理放入箱子：
         // 否则领取/过期移除箱子时物品会洒落在地上造成重复发放，且可被漏斗抽走
-
-        TreasureManager treasureManager = plugin.getTreasureManager();
-        // 使用系统宝藏专属的过期时间
-        Treasure treasure = treasureManager.createTreasure(
-                SYSTEM_OWNER_UUID,
-                SYSTEM_OWNER_NAME,
-                chestLoc,
-                guaranteedCoins,
-                ticketPrice,
-                loot,
-                commands,
-                expireTime
-        );
+        Block block = chestLoc.getBlock();
+        block.setType(Material.CHEST, false);
 
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(worldName);
         plugin.getLogger().info("[自动寻宝] 已生成宝藏 #" + treasure.getId()
@@ -180,6 +185,28 @@ public class AutoTreasureTask extends BukkitRunnable {
             maxZ = (int) (centerZ + halfSize * 0.8);
             minY = 0;
             maxY = world.getMaxHeight();
+        }
+
+        // 归一化配置区间：min > max 时 random.nextInt 会抛 IllegalArgumentException，
+        // 进而取消整个重复任务（自动寻宝会永久停止）
+        if (minX > maxX) {
+            int tmp = minX;
+            minX = maxX;
+            maxX = tmp;
+        }
+        if (minZ > maxZ) {
+            int tmp = minZ;
+            minZ = maxZ;
+            maxZ = tmp;
+        }
+        if (hasYRange && minY > maxY) {
+            int tmp = minY;
+            minY = maxY;
+            maxY = tmp;
+        }
+        if (minX > maxX || minZ > maxZ || (hasYRange && minY > maxY)) {
+            plugin.getLogger().warning("[自动寻宝] 世界 " + world.getName()
+                    + " 的坐标范围配置为反向区间 (min > max)，已自动纠正，建议修正配置");
         }
 
         int skippedUngenerated = 0;
@@ -267,8 +294,9 @@ public class AutoTreasureTask extends BukkitRunnable {
                     if (entry.isCommand()) {
                         commands.add(entry.getCommand());
                     } else {
-                        int amount = entry.getAmountMin()
-                                + random.nextInt(entry.getAmountMax() - entry.getAmountMin() + 1);
+                        int amountMin = Math.max(1, entry.getAmountMin());
+                        int amountMax = Math.max(amountMin, entry.getAmountMax());
+                        int amount = amountMin + random.nextInt(amountMax - amountMin + 1);
                         loot.add(new ItemStack(entry.getMaterial(), amount));
                     }
                     break;

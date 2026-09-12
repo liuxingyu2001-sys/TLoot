@@ -7,63 +7,34 @@ import com.tloot.item.PointerItem;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
-public class MyTreasureGUIListener implements Listener {
+import java.util.Map;
 
-    private final TLoot plugin;
+public class MyTreasureGUIListener extends AbstractGUIListener {
 
     public MyTreasureGUIListener(TLoot plugin) {
-        this.plugin = plugin;
+        super(plugin);
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onClick(InventoryClickEvent event) {
-        if (!(event.getWhoClicked() instanceof Player)) {
-            return;
-        }
+    @Override
+    protected String guiType() {
+        return GUIManager.GUI_MY_TREASURE;
+    }
 
-        Player player = (Player) event.getWhoClicked();
-        String title = player.getOpenInventory().getTitle();
-        String myTitle = ChatColor.DARK_GRAY + "我的寻宝";
-
-        if (!title.equals(myTitle)) {
-            return;
-        }
-
-        event.setCancelled(true);
-
-        if (event.getClickedInventory() == null) {
-            return;
-        }
-
-        if (!event.getClickedInventory().equals(player.getOpenInventory().getTopInventory())) {
-            return;
-        }
-
+    @Override
+    protected void handleClick(Player player, Inventory top, int slot, InventoryClickEvent event) {
         GUIManager guiManager = plugin.getGuiManager();
-        int slot = event.getSlot();
-        int guiSize = 54;
+        int guiSize = top.getSize();
         int page = guiManager.getMyPage(player.getUniqueId());
 
         ItemStack clicked = event.getCurrentItem();
         if (clicked == null || clicked.getType() == Material.AIR) {
             return;
         }
-
-        ItemMeta meta = clicked.getItemMeta();
-        if (meta == null || !meta.hasDisplayName()) {
-            return;
-        }
-
-        String displayName = meta.getDisplayName();
 
         // 返回按钮
         if (slot == guiSize - 8) {
@@ -72,49 +43,74 @@ public class MyTreasureGUIListener implements Listener {
             return;
         }
 
-        // 上一页
+        // 上一页 / 下一页
         if (slot == guiSize - 9) {
-            if (displayName.contains("上一页")) {
+            if (isNavigationArrow(clicked, "上一页")) {
                 GUIManager.playClickSound(player);
                 guiManager.openMyTreasureGUI(player, page - 1);
             }
             return;
         }
 
-        // 下一页
         if (slot == guiSize - 1) {
-            if (displayName.contains("下一页")) {
+            if (isNavigationArrow(clicked, "下一页")) {
                 GUIManager.playClickSound(player);
                 guiManager.openMyTreasureGUI(player, page + 1);
             }
             return;
         }
 
-        // 信息页
+        // 页码信息
         if (slot == guiSize - 5) {
             return;
         }
 
-        // 空状态
-        if (displayName.contains("暂无寻宝记录")) {
-            return;
+        String treasureId = guiManager.getTreasureIdFromItem(clicked);
+        if (treasureId == null) {
+            ItemMeta meta = clicked.getItemMeta();
+            if (meta != null && meta.hasDisplayName()) {
+                String displayName = meta.getDisplayName();
+                if (displayName.contains("暂无寻宝记录")) {
+                    return;
+                }
+                treasureId = extractTreasureId(displayName);
+            }
         }
 
-        // 宝藏物品 - 通过 display name 解析
-        if (displayName.contains("✦ 宝藏 #")) {
-            // 提取 ID: "✦ 宝藏 #XXXXXXXX"
-            String afterHash = displayName.substring(displayName.indexOf("#") + 1).trim();
-            // afterHash could be like "ABC12345" or "ABC12345 (我发起的)"
-            int spaceIdx = afterHash.indexOf(" ");
-            String treasureId;
-            if (spaceIdx > 0) {
-                treasureId = afterHash.substring(0, spaceIdx);
-            } else {
-                treasureId = afterHash;
-            }
-
+        if (treasureId != null && !treasureId.isEmpty()) {
             handleMyTreasureClick(player, treasureId);
         }
+    }
+
+    private boolean isNavigationArrow(ItemStack item, String label) {
+        if (item == null || item.getType() != Material.ARROW) {
+            return false;
+        }
+        ItemMeta meta = item.getItemMeta();
+        return meta != null && meta.hasDisplayName() && meta.getDisplayName().contains(label);
+    }
+
+    /**
+     * 旧格式兜底：从 "✦ 宝藏 #XXXXXXXX" 中解析ID。
+     */
+    private String extractTreasureId(String displayName) {
+        int hashIndex = displayName.indexOf('#');
+        if (hashIndex == -1) {
+            return null;
+        }
+
+        String afterHash = displayName.substring(hashIndex + 1);
+        StringBuilder id = new StringBuilder(8);
+        for (int i = 0; i < afterHash.length() && id.length() < 8; i++) {
+            char c = afterHash.charAt(i);
+            if (Character.isLetterOrDigit(c)) {
+                id.append(c);
+            } else if (id.length() > 0) {
+                break;
+            }
+        }
+
+        return id.length() == 8 ? id.toString().toUpperCase() : null;
     }
 
     private void handleMyTreasureClick(Player player, String treasureId) {
@@ -136,81 +132,57 @@ public class MyTreasureGUIListener implements Listener {
         }
 
         if (treasure.getOwnerUuid().equals(player.getUniqueId())) {
-            // 玩家是发起者 — 显示信息
-            String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
-            GUIManager.playClickSound(player);
-            player.sendMessage(ChatColor.GREEN + "========== 你的寻宝详情 ==========");
-            player.sendMessage(ChatColor.GOLD + "宝藏 #" + treasure.getId());
-            player.sendMessage(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
-            player.sendMessage(ChatColor.GRAY + "坐标: " + ChatColor.DARK_GREEN +
-                    (int) treasure.getLocation().getX() + ", " +
-                    (int) treasure.getLocation().getY() + ", " +
-                    (int) treasure.getLocation().getZ());
-            player.sendMessage(ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins());
-            player.sendMessage(ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + treasure.getTicketPrice());
-            player.sendMessage(ChatColor.GRAY + "参与人数: " + ChatColor.WHITE + treasure.getParticipants().size());
-            player.sendMessage(ChatColor.GRAY + "剩余时间: " + ChatColor.RED + treasure.getRemainingTimeFormatted());
-            player.sendMessage(ChatColor.GREEN + "====================================");
+            sendOwnerDetails(player, treasure);
             return;
         }
 
-        // 玩家是参与者 — 重新获取指针
         if (!treasure.hasParticipant(player.getUniqueId())) {
             player.sendMessage(ChatColor.RED + "你未参与此寻宝！");
             GUIManager.playFailSound(player);
             return;
         }
 
-        // 检查背包是否已有指针
+        // 只检查“指向同一个宝藏”的指针；原实现只要背包里有任意指针就拒绝，
+        // 导致参与多个寻宝的玩家无法重新获取其它宝藏的指针。
         for (ItemStack item : player.getInventory().getContents()) {
-            if (item != null && PointerItem.isPointer(item)) {
-                player.sendMessage(ChatColor.YELLOW + "你背包里已经有寻宝指针了！手持它去寻找宝藏吧。");
+            String id = PointerItem.getTreasureId(item);
+            if (id != null && id.equals(treasure.getId())) {
+                player.sendMessage(ChatColor.YELLOW + "你背包里已经有这个宝藏的指针了！手持它去寻找宝藏吧。");
                 GUIManager.playFailSound(player);
                 return;
             }
         }
 
-        player.getInventory().addItem(PointerItem.createPointer(treasure));
+        if (player.getInventory().firstEmpty() == -1) {
+            player.sendMessage(ChatColor.RED + "背包已满，请先腾出空间！");
+            GUIManager.playFailSound(player);
+            return;
+        }
+
+        Map<Integer, ItemStack> leftover = player.getInventory().addItem(PointerItem.createPointer(treasure));
+        for (ItemStack item : leftover.values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), item);
+        }
+
         GUIManager.playSuccessSound(player);
         player.sendMessage(ChatColor.GREEN + "已重新获取寻宝指针！");
         player.sendMessage(ChatColor.GRAY + "寻宝ID: " + ChatColor.AQUA + treasure.getId());
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onDrag(InventoryDragEvent event) {
-        if (!(event.getWhoClicked() instanceof Player)) {
-            return;
-        }
-
-        Player player = (Player) event.getWhoClicked();
-        String title = player.getOpenInventory().getTitle();
-        String myTitle = ChatColor.DARK_GRAY + "我的寻宝";
-
-        if (!title.equals(myTitle)) {
-            return;
-        }
-
-        int guiSize = 54;
-        for (int slot : event.getRawSlots()) {
-            if (slot < guiSize) {
-                event.setCancelled(true);
-                return;
-            }
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onClose(InventoryCloseEvent event) {
-        if (!(event.getPlayer() instanceof Player)) {
-            return;
-        }
-
-        Player player = (Player) event.getPlayer();
-        GUIManager guiManager = plugin.getGuiManager();
-        String openGUI = guiManager.getOpenGUI(player.getUniqueId());
-
-        if (openGUI != null && openGUI.equals("mytreasure")) {
-            guiManager.removePlayer(player.getUniqueId());
-        }
+    private void sendOwnerDetails(Player player, Treasure treasure) {
+        String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
+        GUIManager.playClickSound(player);
+        player.sendMessage(ChatColor.GREEN + "========== 你的寻宝详情 ==========");
+        player.sendMessage(ChatColor.GOLD + "宝藏 #" + treasure.getId());
+        player.sendMessage(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
+        player.sendMessage(ChatColor.GRAY + "坐标: " + ChatColor.DARK_GREEN
+                + treasure.getLocation().getBlockX() + ", "
+                + treasure.getLocation().getBlockY() + ", "
+                + treasure.getLocation().getBlockZ());
+        player.sendMessage(ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins());
+        player.sendMessage(ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + treasure.getTicketPrice());
+        player.sendMessage(ChatColor.GRAY + "参与人数: " + ChatColor.WHITE + treasure.getParticipantCount());
+        player.sendMessage(ChatColor.GRAY + "剩余时间: " + ChatColor.RED + treasure.getRemainingTimeFormatted());
+        player.sendMessage(ChatColor.GREEN + "====================================");
     }
 }

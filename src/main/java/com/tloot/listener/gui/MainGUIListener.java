@@ -3,102 +3,38 @@ package com.tloot.listener.gui;
 import com.tloot.TLoot;
 import com.tloot.gui.GUIManager;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.inventory.Inventory;
 
-import java.util.UUID;
-
-public class MainGUIListener implements Listener {
-
-    private final TLoot plugin;
+public class MainGUIListener extends AbstractGUIListener {
 
     public MainGUIListener(TLoot plugin) {
-        this.plugin = plugin;
+        super(plugin);
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onClick(InventoryClickEvent event) {
-        if (!(event.getWhoClicked() instanceof Player)) {
-            return;
-        }
+    @Override
+    protected String guiType() {
+        return GUIManager.GUI_MAIN;
+    }
 
-        Player player = (Player) event.getWhoClicked();
-        String title = player.getOpenInventory().getTitle();
-        String mainTitle = plugin.getConfigManager().getGuiTitle("main");
-
-        if (!title.equals(mainTitle)) {
-            return;
-        }
-
-        event.setCancelled(true);
-
-        if (event.getClickedInventory() == null) {
-            return;
-        }
-
-        if (!event.getClickedInventory().equals(player.getOpenInventory().getTopInventory())) {
-            return;
-        }
-
+    @Override
+    protected void handleClick(Player player, Inventory top, int slot, InventoryClickEvent event) {
         GUIManager guiManager = plugin.getGuiManager();
-        int slot = event.getSlot();
 
-        if (slot == 11) {
-            // 发起寻宝
-            guiManager.openCreateMenu(player);
-        } else if (slot == 13) {
-            // 参与寻宝
-            GUIManager.playClickSound(player);
-            guiManager.openCompassMenu(player, 1);
-        } else if (slot == 15) {
-            // 我的寻宝 → GUI!
-            guiManager.openMyTreasureGUI(player, 1);
-        } else if (slot == 22) {
-            // 帮助提示
-            player.closeInventory();
-            player.performCommand("treasure help");
-        }
-    }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onDrag(InventoryDragEvent event) {
-        if (!(event.getWhoClicked() instanceof Player)) {
-            return;
-        }
-
-        Player player = (Player) event.getWhoClicked();
-        String title = player.getOpenInventory().getTitle();
-        String mainTitle = plugin.getConfigManager().getGuiTitle("main");
-
-        if (!title.equals(mainTitle)) {
-            return;
-        }
-
-        int guiSize = player.getOpenInventory().getTopInventory().getSize();
-        for (int slot : event.getRawSlots()) {
-            if (slot < guiSize) {
-                event.setCancelled(true);
-                return;
+        switch (slot) {
+            case 11 -> guiManager.openCreateMenu(player);
+            case 13 -> {
+                GUIManager.playClickSound(player);
+                guiManager.openCompassMenu(player, 1);
             }
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onClose(InventoryCloseEvent event) {
-        if (!(event.getPlayer() instanceof Player)) {
-            return;
-        }
-
-        Player player = (Player) event.getPlayer();
-        GUIManager guiManager = plugin.getGuiManager();
-        String openGUI = guiManager.getOpenGUI(player.getUniqueId());
-
-        if (openGUI != null && openGUI.equals("main")) {
-            guiManager.removePlayer(player.getUniqueId());
+            case 15 -> guiManager.openMyTreasureGUI(player, 1);
+            case 22 -> {
+                player.closeInventory();
+                player.performCommand("treasure help");
+            }
+            default -> {
+                // 其它槽位为装饰物品，忽略点击
+            }
         }
     }
 }

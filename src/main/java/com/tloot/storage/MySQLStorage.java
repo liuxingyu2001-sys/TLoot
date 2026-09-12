@@ -26,8 +26,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 public class MySQLStorage implements StorageBackend {
@@ -41,8 +42,27 @@ public class MySQLStorage implements StorageBackend {
     private final String tablePrefix;
     private final int poolSize;
 
+    private static final String UPSERT_SQL =
+            "INSERT INTO %s (id, owner_uuid, owner_name, world, x, y, z, guaranteed_coins, ticket_price,"
+                    + " create_time, expire_time, items, commands, participants) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    + "ON DUPLICATE KEY UPDATE "
+                    + "owner_uuid=VALUES(owner_uuid), owner_name=VALUES(owner_name), world=VALUES(world), "
+                    + "x=VALUES(x), y=VALUES(y), z=VALUES(z), guaranteed_coins=VALUES(guaranteed_coins), "
+                    + "ticket_price=VALUES(ticket_price), create_time=VALUES(create_time), "
+                    + "expire_time=VALUES(expire_time), items=VALUES(items), commands=VALUES(commands), "
+                    + "participants=VALUES(participants)";
+
     private HikariDataSource dataSource;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    /**
+     * 单线程异步写库，有界队列。
+     *
+     * 旧实现使用无界队列（Executors.newSingleThreadExecutor）：数据库卡顿时任务会无限堆积，
+     * 每个任务还持有 Treasure 强引用，长时间阻塞会持续占用内存。
+     * 队列满说明数据库已严重滞后，此时丢弃最旧的待写任务（都是整条记录的全量 upsert，
+     * 丢弃旧任务不会丢数据）比让服务器主线程执行 JDBC 写入更安全，同时记录日志便于排查。
+     */
+    private ExecutorService executor;
 
     public MySQLStorage(TLoot plugin, String host, int port, String database,
                         String username, String password, String tablePrefix, int poolSize) {
@@ -58,6 +78,16 @@ public class MySQLStorage implements StorageBackend {
 
     @Override
     public void init() {
+        executor = new ThreadPoolExecutor(1, 1, 60L, TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(2048),
+                new ThreadPoolExecutor.DiscardOldestPolicy() {
+                    @Override
+                    public void rejectedExecution(Runnable task, ThreadPoolExecutor pool) {
+                        super.rejectedExecution(task, pool);
+                        plugin.getLogger().warning("数据库写入队列已满，丢弃了一条较早的宝藏变更（请检查数据库性能）");
+                    }
+                });
+
         createDatabase();
 
         HikariConfig config = new HikariConfig();
@@ -118,17 +148,31 @@ public class MySQLStorage implements StorageBackend {
     @Override
     public Map<String, Treasure> loadAll() {
         Map<String, Treasure> result = new HashMap<>();
+        if (dataSource == null) {
+            plugin.getLogger().severe("数据库尚未初始化，无法加载宝藏数据");
+            return result;
+        }
         String sql = "SELECT * FROM " + tablePrefix + "treasures";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
 
+            int skipped = 0;
             while (rs.next()) {
-                Treasure treasure = fromResultSet(rs);
-                if (treasure != null && !treasure.isExpired()) {
-                    result.put(treasure.getId(), treasure);
+                try {
+                    Treasure treasure = fromResultSet(rs);
+                    if (treasure != null && !treasure.isExpired()) {
+                        result.put(treasure.getId(), treasure);
+                    }
+                } catch (Exception e) {
+                    // 单行数据损坏（例如 uuid 字段被手工改坏）不应让整份宝藏数据加载失败
+                    skipped++;
+                    plugin.getLogger().warning("跳过一条无法解析的宝藏记录: " + e.getMessage());
                 }
+            }
+            if (skipped > 0) {
+                plugin.getLogger().warning("共跳过 " + skipped + " 条损坏的宝藏记录");
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("无法加载宝藏数据: " + e.getMessage());
@@ -138,37 +182,27 @@ public class MySQLStorage implements StorageBackend {
 
     @Override
     public void save(Treasure treasure) {
-        executor.submit(() -> {
-            String sql = "INSERT INTO " + tablePrefix + "treasures " +
-                    "(id, owner_uuid, owner_name, world, x, y, z, guaranteed_coins, ticket_price, create_time, expire_time, items, commands, participants) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-                    "ON DUPLICATE KEY UPDATE " +
-                    "owner_uuid=VALUES(owner_uuid), owner_name=VALUES(owner_name), world=VALUES(world), " +
-                    "x=VALUES(x), y=VALUES(y), z=VALUES(z), guaranteed_coins=VALUES(guaranteed_coins), " +
-                    "ticket_price=VALUES(ticket_price), create_time=VALUES(create_time), expire_time=VALUES(expire_time), " +
-                    "items=VALUES(items), commands=VALUES(commands), participants=VALUES(participants)";
+        if (dataSource == null || executor == null || treasure == null) {
+            return;
+        }
 
+        // 提前在调用线程（主线程）完成数据快照，避免异步线程读取可变对象
+        final String itemsBase64;
+        try {
+            itemsBase64 = itemStacksToBase64(treasure.getItems());
+        } catch (RuntimeException e) {
+            // 不能写入 NULL：那会把数据库里原有的奖励物品覆盖掉
+            plugin.getLogger().severe("宝藏 " + treasure.getId() + " 的物品无法序列化，已跳过本次保存: "
+                    + e.getMessage());
+            return;
+        }
+        String commands = String.join("\n", treasure.getCommands());
+        String participants = joinParticipants(treasure.getParticipants());
+
+        executor.submit(() -> {
             try (Connection conn = dataSource.getConnection();
-                 PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, treasure.getId());
-                ps.setString(2, treasure.getOwnerUuid().toString());
-                ps.setString(3, treasure.getOwnerName());
-                ps.setString(4, treasure.getWorldName());
-                Location loc = treasure.getLocation();
-                ps.setDouble(5, loc.getX());
-                ps.setDouble(6, loc.getY());
-                ps.setDouble(7, loc.getZ());
-                ps.setInt(8, treasure.getGuaranteedCoins());
-                ps.setInt(9, treasure.getTicketPrice());
-                ps.setLong(10, treasure.getCreateTime());
-                ps.setLong(11, treasure.getExpireTime());
-                ps.setString(12, itemStacksToBase64(treasure.getItems()));
-                ps.setString(13, String.join("\n", treasure.getCommands()));
-                List<String> participantStrs = new ArrayList<>();
-                for (UUID uuid : treasure.getParticipants()) {
-                    participantStrs.add(uuid.toString());
-                }
-                ps.setString(14, String.join(",", participantStrs));
+                 PreparedStatement ps = conn.prepareStatement(upsertSql())) {
+                bind(ps, treasure, itemsBase64, commands, participants);
                 ps.executeUpdate();
             } catch (SQLException e) {
                 plugin.getLogger().severe("无法保存宝藏 " + treasure.getId() + ": " + e.getMessage());
@@ -178,6 +212,10 @@ public class MySQLStorage implements StorageBackend {
 
     @Override
     public void delete(String id) {
+        if (dataSource == null || executor == null || id == null) {
+            return;
+        }
+
         executor.submit(() -> {
             String sql = "DELETE FROM " + tablePrefix + "treasures WHERE id = ?";
             try (Connection conn = dataSource.getConnection();
@@ -192,52 +230,97 @@ public class MySQLStorage implements StorageBackend {
 
     @Override
     public void saveAll(Collection<Treasure> treasures) {
-        executor.submit(() -> {
-            String sql = "INSERT INTO " + tablePrefix + "treasures " +
-                    "(id, owner_uuid, owner_name, world, x, y, z, guaranteed_coins, ticket_price, create_time, expire_time, items, commands, participants) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-                    "ON DUPLICATE KEY UPDATE " +
-                    "owner_uuid=VALUES(owner_uuid), owner_name=VALUES(owner_name), world=VALUES(world), " +
-                    "x=VALUES(x), y=VALUES(y), z=VALUES(z), guaranteed_coins=VALUES(guaranteed_coins), " +
-                    "ticket_price=VALUES(ticket_price), create_time=VALUES(create_time), expire_time=VALUES(expire_time), " +
-                    "items=VALUES(items), commands=VALUES(commands), participants=VALUES(participants)";
+        if (dataSource == null || executor == null || treasures == null || treasures.isEmpty()) {
+            return;
+        }
 
+        List<Treasure> snapshot = new ArrayList<>(treasures);
+        List<String> itemsData = new ArrayList<>(snapshot.size());
+        List<String> commandsData = new ArrayList<>(snapshot.size());
+        List<String> participantsData = new ArrayList<>(snapshot.size());
+        for (Treasure treasure : snapshot) {
+            try {
+                itemsData.add(itemStacksToBase64(treasure.getItems()));
+            } catch (RuntimeException e) {
+                // 写入 NULL 会覆盖数据库中已有的奖励物品，因此整条记录跳过（原因见上）
+                plugin.getLogger().severe("宝藏 " + treasure.getId() + " 的物品无法序列化，已跳过该记录: "
+                        + e.getMessage());
+                continue;
+            }
+            commandsData.add(String.join("\n", treasure.getCommands()));
+            participantsData.add(joinParticipants(treasure.getParticipants()));
+        }
+
+        if (snapshot.isEmpty()) {
+            return;
+        }
+
+        executor.submit(() -> {
             try (Connection conn = dataSource.getConnection();
-                 PreparedStatement ps = conn.prepareStatement(sql)) {
+                 PreparedStatement ps = conn.prepareStatement(upsertSql())) {
+                boolean originalAutoCommit = conn.getAutoCommit();
                 conn.setAutoCommit(false);
-                for (Treasure treasure : treasures) {
-                    ps.setString(1, treasure.getId());
-                    ps.setString(2, treasure.getOwnerUuid().toString());
-                    ps.setString(3, treasure.getOwnerName());
-                    ps.setString(4, treasure.getWorldName());
-                    Location loc = treasure.getLocation();
-                    ps.setDouble(5, loc.getX());
-                    ps.setDouble(6, loc.getY());
-                    ps.setDouble(7, loc.getZ());
-                    ps.setInt(8, treasure.getGuaranteedCoins());
-                    ps.setInt(9, treasure.getTicketPrice());
-                    ps.setLong(10, treasure.getCreateTime());
-                    ps.setLong(11, treasure.getExpireTime());
-                    ps.setString(12, itemStacksToBase64(treasure.getItems()));
-                    ps.setString(13, String.join("\n", treasure.getCommands()));
-                    List<String> participantStrs = new ArrayList<>();
-                    for (UUID uuid : treasure.getParticipants()) {
-                        participantStrs.add(uuid.toString());
+                try {
+                    for (int i = 0; i < snapshot.size(); i++) {
+                        bind(ps, snapshot.get(i), itemsData.get(i), commandsData.get(i), participantsData.get(i));
+                        ps.addBatch();
                     }
-                    ps.setString(14, String.join(",", participantStrs));
-                    ps.addBatch();
+                    ps.executeBatch();
+                    conn.commit();
+                } catch (SQLException e) {
+                    conn.rollback();
+                    throw e;
+                } finally {
+                    conn.setAutoCommit(originalAutoCommit);
                 }
-                ps.executeBatch();
-                conn.commit();
-                conn.setAutoCommit(true);
             } catch (SQLException e) {
                 plugin.getLogger().severe("无法批量保存宝藏数据: " + e.getMessage());
             }
         });
     }
 
+    private String upsertSql() {
+        return UPSERT_SQL.formatted(tablePrefix + "treasures");
+    }
+
+    private static String joinParticipants(List<UUID> participants) {
+        List<String> participantStrs = new ArrayList<>(participants.size());
+        for (UUID uuid : participants) {
+            participantStrs.add(uuid.toString());
+        }
+        return String.join(",", participantStrs);
+    }
+
+    private static void bind(PreparedStatement ps, Treasure treasure,
+                             String itemsBase64, String commands, String participants) throws SQLException {
+        ps.setString(1, treasure.getId());
+        ps.setString(2, treasure.getOwnerUuid().toString());
+        ps.setString(3, treasure.getOwnerName());
+        ps.setString(4, treasure.getWorldName());
+
+        Location loc = treasure.getLocation();
+        ps.setDouble(5, loc != null ? loc.getX() : 0);
+        ps.setDouble(6, loc != null ? loc.getY() : 0);
+        ps.setDouble(7, loc != null ? loc.getZ() : 0);
+
+        ps.setInt(8, treasure.getGuaranteedCoins());
+        ps.setInt(9, treasure.getTicketPrice());
+        ps.setLong(10, treasure.getCreateTime());
+        ps.setLong(11, treasure.getExpireTime());
+        ps.setString(12, itemsBase64);
+        ps.setString(13, commands);
+        ps.setString(14, participants);
+    }
+
     @Override
     public void close() {
+        if (executor == null) {
+            if (dataSource != null && !dataSource.isClosed()) {
+                dataSource.close();
+            }
+            return;
+        }
+
         executor.shutdown();
         try {
             if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {

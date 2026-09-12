@@ -4,13 +4,13 @@ import com.tloot.TLoot;
 import com.tloot.data.Treasure;
 import com.tloot.data.TreasureManager;
 import com.tloot.item.PointerItem;
+import com.tloot.util.TreasureBlocks;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
-import org.bukkit.block.Chest;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -36,10 +36,19 @@ public class TreasureListener implements Listener {
         this.plugin = plugin;
     }
 
+    private TreasureManager treasureManager() {
+        return plugin.getTreasureManager();
+    }
+
+    private boolean isTreasureChest(Block block) {
+        return block != null
+                && block.getType() == Material.CHEST
+                && treasureManager().findTreasureAtLocation(block.getLocation()) != null;
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBlockBreak(BlockBreakEvent event) {
-        Block block = event.getBlock();
-        if (block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null) {
+        if (isTreasureChest(event.getBlock())) {
             event.setCancelled(true);
             event.getPlayer().sendMessage(plugin.getMessageManager().get("prefix") + "§c这个宝藏箱子不能被破坏！");
         }
@@ -47,30 +56,24 @@ public class TreasureListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onEntityExplode(EntityExplodeEvent event) {
-        event.blockList().removeIf(block ->
-            block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null
-        );
+        event.blockList().removeIf(this::isTreasureChest);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBlockExplode(BlockExplodeEvent event) {
-        event.blockList().removeIf(block ->
-            block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null
-        );
+        event.blockList().removeIf(this::isTreasureChest);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBlockBurn(BlockBurnEvent event) {
-        Block block = event.getBlock();
-        if (block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null) {
+        if (isTreasureChest(event.getBlock())) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBlockIgnite(BlockIgniteEvent event) {
-        Block block = event.getBlock();
-        if (block.getType() == Material.CHEST && plugin.getTreasureManager().findTreasureAtLocation(block.getLocation()) != null) {
+        if (isTreasureChest(event.getBlock())) {
             event.setCancelled(true);
         }
     }
@@ -86,17 +89,15 @@ public class TreasureListener implements Listener {
 
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
             Block clickedBlock = event.getClickedBlock();
-            if (clickedBlock != null && clickedBlock.getType() == Material.CHEST) {
-                if (handleChestClick(player, clickedBlock, event)) {
-                    return;
-                }
+            if (clickedBlock != null && clickedBlock.getType() == Material.CHEST
+                    && handleChestClick(player, clickedBlock, event)) {
+                return;
             }
         }
 
-        if (event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK) {
-            if (PointerItem.isPointer(item)) {
-                handlePointerUse(player, item, event);
-            }
+        if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK)
+                && PointerItem.isPointer(item)) {
+            handlePointerUse(player, item, event);
         }
     }
 
@@ -106,18 +107,18 @@ public class TreasureListener implements Listener {
             return;
         }
 
-        Treasure treasure = plugin.getTreasureManager().getTreasure(treasureId);
+        Treasure treasure = treasureManager().getTreasure(treasureId);
 
         if (treasure == null) {
             player.sendMessage(plugin.getMessageManager().get("expire.pointer-expired"));
-            item.setAmount(0);
+            player.getInventory().setItemInMainHand(null);
             return;
         }
 
         if (treasure.isExpired()) {
             player.sendMessage(plugin.getMessageManager().get("expire.treasure-expired"));
-            plugin.getTreasureManager().expireTreasure(treasureId);
-            item.setAmount(0);
+            player.getInventory().setItemInMainHand(null);
+            treasureManager().expireTreasure(treasureId);
             return;
         }
 
@@ -127,24 +128,47 @@ public class TreasureListener implements Listener {
         }
 
         event.setCancelled(true);
-        player.setCompassTarget(treasure.getLocation());
+        Location treasureLoc = treasure.getLocation();
+        player.setCompassTarget(treasureLoc);
+
+        // 跨世界时 Location#distance 会抛 IllegalArgumentException，必须判断世界是否一致
+        if (player.getWorld().equals(treasureLoc.getWorld())) {
+            player.sendMessage(ChatColor.GREEN + "指针已指向宝藏 #" + treasureId + "，距离 "
+                    + (int) Math.round(player.getLocation().distance(treasureLoc)) + " 格");
+        } else {
+            player.sendMessage(ChatColor.GREEN + "指针已指向宝藏 #" + treasureId);
+            player.sendMessage(ChatColor.GRAY + "该宝藏位于其它世界: " + ChatColor.AQUA
+                    + plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName()));
+        }
     }
 
+    /**
+     * @return true 表示事件已被本插件处理（调用方不应再继续处理）
+     */
     private boolean handleChestClick(Player player, Block chestBlock, PlayerInteractEvent event) {
-        Treasure treasure = plugin.getTreasureManager().findTreasureAtLocation(chestBlock.getLocation());
-
+        Treasure treasure = treasureManager().findTreasureAtLocation(chestBlock.getLocation());
         if (treasure == null) {
             return false;
         }
 
         if (treasure.isExpired()) {
             player.sendMessage(ChatColor.RED + "这个宝藏已经过期了！");
-            plugin.getTreasureManager().expireTreasure(treasure.getId());
-            return false;
+            treasureManager().expireTreasure(treasure.getId());
+            return true;
         }
 
         if (!treasure.hasParticipant(player.getUniqueId())) {
-            player.sendMessage(ChatColor.RED + "你没有参与这个寻宝！");
+            player.sendMessage(plugin.getMessageManager().get("claim.not-your-treasure"));
+            event.setCancelled(true);
+            return true;
+        }
+
+        // 防止客户端作弊/跨世界交互远程领取：校验实际距离
+        Location treasureLoc = treasure.getLocation();
+        if (!player.getWorld().equals(treasureLoc.getWorld())
+                || player.getLocation().distanceSquared(treasureLoc)
+                > Math.pow(plugin.getConfigManager().getClaimDistance() + 1.0, 2)) {
+            player.sendMessage(plugin.getMessageManager().get("claim.too-far"));
             event.setCancelled(true);
             return true;
         }
@@ -156,46 +180,42 @@ public class TreasureListener implements Listener {
 
     private void claimTreasure(Player player, Treasure treasure, Block chestBlock) {
         Economy economy = plugin.getEconomy();
-        TreasureManager treasureManager = plugin.getTreasureManager();
+        TreasureManager treasureManager = treasureManager();
+        String treasureId = treasure.getId();
 
-        int coins = treasure.getGuaranteedCoins();
-        economy.depositPlayer(player, coins);
+        // 1) 先清空箱子并移除箱子方块，避免"钱已到账、宝藏还在"的漏洞
+        TreasureBlocks.removeChest(chestBlock.getLocation());
+
+        // 2) 注销宝藏（内存 + 存储 + 跨服广播）
+        treasureManager.claimTreasure(treasureId, player.getName());
+
+        // 3) 先回收指针，再发放奖励：否则奖励占满背包后，多余的指针会被当成"放不下的奖励"掉在地上
+        PointerItem.removePointers(player, treasureId);
 
         List<ItemStack> items = treasure.getItems();
         Map<Integer, ItemStack> leftovers = player.getInventory().addItem(items.toArray(new ItemStack[0]));
-
-        treasureManager.claimTreasure(treasure.getId(), player.getName());
-
-        // 先清空箱子内残留的物理物品，再移除箱子，避免物品以掉落物形式洒落（重复发放）
-        if (chestBlock.getState() instanceof Chest chest) {
-            chest.getInventory().clear();
-        }
-        chestBlock.setType(Material.AIR);
-
-        // 背包放不下的奖励在领取点附近掉落，确保奖励不丢失
         for (ItemStack leftover : leftovers.values()) {
             player.getWorld().dropItemNaturally(player.getLocation(), leftover);
         }
 
-        for (ItemStack item : player.getInventory().getContents()) {
-            String id = PointerItem.getTreasureId(item);
-            if (id != null && id.equals(treasure.getId())) {
-                item.setAmount(0);
-            }
+        int coins = treasure.getGuaranteedCoins();
+        if (coins > 0 && !economy.depositPlayer(player, coins).transactionSuccess()) {
+            plugin.getLogger().warning("无法向玩家 " + player.getName() + " 发放保底金币 " + coins
+                    + "（宝藏 #" + treasureId + "），请检查经济插件");
         }
 
         player.sendMessage(plugin.getMessageManager().get("claim.success"));
         player.sendMessage(ChatColor.GREEN + "你获得了 " + ChatColor.GOLD + coins + ChatColor.GREEN + " 金币！");
 
         for (String command : treasure.getCommands()) {
-            String executed = command.replace("{player}", player.getName());
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), executed);
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command.replace("{player}", player.getName()));
         }
 
-        String ownerName = treasure.getOwnerName();
+        // 本服公告在此发出；其它子服的公告由 Redis 的 onTreasureClaimed 回调发出
+        // （不能只依赖回调：Redis 默认关闭时回调根本不会触发，公告会完全消失）
         plugin.getServer().broadcastMessage(
-            plugin.getMessageManager().get("prefix") + 
-            "§e" + player.getName() + " §a找到了 §e" + ownerName + " §a发起的宝藏！"
+                plugin.getMessageManager().get("prefix")
+                        + "§e" + player.getName() + " §a找到了 §e" + treasure.getOwnerName() + " §a发起的宝藏！"
         );
     }
 }

@@ -5,68 +5,39 @@ import com.tloot.data.Treasure;
 import com.tloot.gui.GUIManager;
 import com.tloot.item.PointerItem;
 import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
+import java.util.Map;
 import java.util.UUID;
 
-public class CompassGUIListener implements Listener {
-
-    private final TLoot plugin;
+public class CompassGUIListener extends AbstractGUIListener {
 
     public CompassGUIListener(TLoot plugin) {
-        this.plugin = plugin;
+        super(plugin);
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onClick(InventoryClickEvent event) {
-        if (!(event.getWhoClicked() instanceof Player)) {
-            return;
-        }
+    @Override
+    protected String guiType() {
+        return GUIManager.GUI_COMPASS;
+    }
 
-        Player player = (Player) event.getWhoClicked();
-        String title = player.getOpenInventory().getTitle();
-        String compassTitle = plugin.getConfigManager().getGuiTitle("compass");
-
-        if (!title.equals(compassTitle)) {
-            return;
-        }
-
-        event.setCancelled(true);
-
-        if (event.getClickedInventory() == null) {
-            return;
-        }
-
-        if (!event.getClickedInventory().equals(player.getOpenInventory().getTopInventory())) {
-            return;
-        }
-
+    @Override
+    protected void handleClick(Player player, Inventory top, int slot, InventoryClickEvent event) {
         GUIManager guiManager = plugin.getGuiManager();
-        int slot = event.getSlot();
-        int guiSize = plugin.getConfigManager().getGuiSize("compass");
+        int guiSize = top.getSize();
         int page = guiManager.getCompassPage(player.getUniqueId());
 
         ItemStack clicked = event.getCurrentItem();
         if (clicked == null || clicked.getType() == Material.AIR) {
             return;
         }
-
-        ItemMeta meta = clicked.getItemMeta();
-        if (meta == null || !meta.hasDisplayName()) {
-            return;
-        }
-
-        String displayName = meta.getDisplayName();
 
         // 返回按钮
         if (slot == guiSize - 8) {
@@ -75,66 +46,79 @@ public class CompassGUIListener implements Listener {
             return;
         }
 
-        // 上一页
+        // 上一页 / 下一页
         if (slot == guiSize - 9) {
-            if (displayName.contains("上一页") && !displayName.contains("已是")) {
+            if (isNavigationArrow(clicked, "上一页")) {
                 GUIManager.playClickSound(player);
                 guiManager.openCompassMenu(player, page - 1);
             }
             return;
         }
 
-        // 下一页
         if (slot == guiSize - 1) {
-            if (displayName.contains("下一页") && !displayName.contains("已是")) {
+            if (isNavigationArrow(clicked, "下一页")) {
                 GUIManager.playClickSound(player);
                 guiManager.openCompassMenu(player, page + 1);
             }
             return;
         }
 
-        // 信息页 - 忽略点击
+        // 页码信息
         if (slot == guiSize - 5) {
             return;
         }
 
-        // 宝藏物品 - 通过 display name 解析 ID
-        if (displayName.startsWith(ChatColor.GREEN + "宝藏 #")) {
-            String treasureId = extractTreasureId(displayName);
-            if (treasureId != null && !treasureId.isEmpty()) {
-                handleClaimCompass(player, treasureId);
+        // 宝藏物品 —— 优先读取物品上绑定的宝藏ID（PDC），仅旧物品回退到解析显示名称
+        String treasureId = guiManager.getTreasureIdFromItem(clicked);
+        if (treasureId == null) {
+            ItemMeta meta = clicked.getItemMeta();
+            if (meta != null && meta.hasDisplayName()) {
+                treasureId = extractTreasureId(meta.getDisplayName());
             }
+        }
+
+        if (treasureId != null && !treasureId.isEmpty()) {
+            handleClaimCompass(player, treasureId);
         }
     }
 
-    private String extractTreasureId(String displayName) {
-        // 从显示名称中提取宝藏ID，格式: "§a宝藏 #XXXXXXXX"
-        try {
-            int hashIndex = displayName.indexOf("#");
-            if (hashIndex == -1) {
-                return null;
-            }
-            // 提取从 # 后面到颜色代码或结尾的字符串
-            String afterHash = displayName.substring(hashIndex + 1).trim();
-            // 查找下一个颜色代码（如果有）
-            int colorIndex = -1;
-            for (int i = 0; i < afterHash.length(); i++) {
-                if (afterHash.charAt(i) == '§' && i + 1 < afterHash.length()) {
-                    colorIndex = i;
-                    break;
-                }
-            }
-            if (colorIndex > 0) {
-                afterHash = afterHash.substring(0, colorIndex).trim();
-            }
-            // 宝藏ID是8位大写字母/数字
-            if (afterHash.length() >= 8) {
-                return afterHash.substring(0, 8).toUpperCase();
-            }
-        } catch (Exception e) {
-            plugin.getLogger().warning("解析宝藏ID失败: " + displayName);
+    /**
+     * 仅当槽位放着可用的箭头按钮时才翻页；
+     * 禁用状态显示为灰色染料「已是第一页 / 已是最后一页」，不会响应点击。
+     */
+    private boolean isNavigationArrow(ItemStack item, String label) {
+        if (item == null || item.getType() != Material.ARROW) {
+            return false;
         }
-        return null;
+        ItemMeta meta = item.getItemMeta();
+        return meta != null && meta.hasDisplayName() && meta.getDisplayName().contains(label);
+    }
+
+    /**
+     * 旧格式兜底：从显示名称 "§a宝藏 #XXXXXXXX" 中解析ID。
+     * 新物品通过 PersistentDataContainer 直接携带ID，不再依赖此方法。
+     */
+    private String extractTreasureId(String displayName) {
+        int hashIndex = displayName.indexOf('#');
+        if (hashIndex == -1) {
+            return null;
+        }
+
+        String afterHash = displayName.substring(hashIndex + 1);
+        StringBuilder id = new StringBuilder(8);
+        for (int i = 0; i < afterHash.length() && id.length() < 8; i++) {
+            char c = afterHash.charAt(i);
+            if (c == '§') {
+                break;
+            }
+            if (Character.isLetterOrDigit(c)) {
+                id.append(c);
+            } else if (id.length() > 0) {
+                break;
+            }
+        }
+
+        return id.length() == 8 ? id.toString().toUpperCase() : null;
     }
 
     private void handleClaimCompass(Player player, String treasureId) {
@@ -144,16 +128,14 @@ public class CompassGUIListener implements Listener {
         if (treasure == null) {
             player.sendMessage(ChatColor.RED + "该宝藏已不存在！");
             GUIManager.playFailSound(player);
-            guiManager.openCompassMenu(player,
-                    guiManager.getCompassPage(player.getUniqueId()));
+            guiManager.openCompassMenu(player, guiManager.getCompassPage(player.getUniqueId()));
             return;
         }
 
         if (treasure.isExpired()) {
             player.sendMessage(ChatColor.RED + "该宝藏已过期！");
             GUIManager.playFailSound(player);
-            guiManager.openCompassMenu(player,
-                    guiManager.getCompassPage(player.getUniqueId()));
+            guiManager.openCompassMenu(player, guiManager.getCompassPage(player.getUniqueId()));
             return;
         }
 
@@ -171,6 +153,13 @@ public class CompassGUIListener implements Listener {
             return;
         }
 
+        // 背包满时不允许扣费：原实现先扣费再 addItem，放不下的指针会掉在地上，玩家等于白花钱
+        if (player.getInventory().firstEmpty() == -1) {
+            player.sendMessage(ChatColor.RED + "背包已满，请先腾出空间再领取寻宝指针！");
+            GUIManager.playFailSound(player);
+            return;
+        }
+
         Economy economy = plugin.getEconomy();
         int ticketPrice = treasure.getTicketPrice();
 
@@ -180,12 +169,21 @@ public class CompassGUIListener implements Listener {
             return;
         }
 
-        economy.withdrawPlayer(player, ticketPrice);
+        EconomyResponse withdraw = economy.withdrawPlayer(player, ticketPrice);
+        if (!withdraw.transactionSuccess()) {
+            player.sendMessage(ChatColor.RED + "扣款失败: " + withdraw.errorMessage);
+            GUIManager.playFailSound(player);
+            return;
+        }
+
         plugin.getTreasureManager().addParticipant(treasureId, uuid);
 
-        player.getInventory().addItem(PointerItem.createPointer(treasure));
-        player.closeInventory();
+        Map<Integer, ItemStack> leftover = player.getInventory().addItem(PointerItem.createPointer(treasure));
+        for (ItemStack item : leftover.values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), item);
+        }
 
+        player.closeInventory();
         GUIManager.playSuccessSound(player);
 
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
@@ -193,43 +191,5 @@ public class CompassGUIListener implements Listener {
         player.sendMessage(ChatColor.GRAY + "寻宝ID: " + ChatColor.AQUA + treasure.getId());
         player.sendMessage(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
         player.sendMessage(ChatColor.GRAY + "手持指南针找到宝藏吧！");
-    }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onDrag(InventoryDragEvent event) {
-        if (!(event.getWhoClicked() instanceof Player)) {
-            return;
-        }
-
-        Player player = (Player) event.getWhoClicked();
-        String title = player.getOpenInventory().getTitle();
-        String compassTitle = plugin.getConfigManager().getGuiTitle("compass");
-
-        if (!title.equals(compassTitle)) {
-            return;
-        }
-
-        int guiSize = plugin.getConfigManager().getGuiSize("compass");
-        for (int slot : event.getRawSlots()) {
-            if (slot < guiSize) {
-                event.setCancelled(true);
-                return;
-            }
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onClose(InventoryCloseEvent event) {
-        if (!(event.getPlayer() instanceof Player)) {
-            return;
-        }
-
-        Player player = (Player) event.getPlayer();
-        GUIManager guiManager = plugin.getGuiManager();
-        String openGUI = guiManager.getOpenGUI(player.getUniqueId());
-
-        if (openGUI != null && openGUI.equals("compass")) {
-            guiManager.removePlayer(player.getUniqueId());
-        }
     }
 }

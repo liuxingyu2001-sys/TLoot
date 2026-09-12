@@ -7,12 +7,14 @@ import com.tloot.data.TreasureManager;
 import com.tloot.gui.GUIManager;
 import com.tloot.item.PointerItem;
 import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,12 +30,17 @@ public class TreasureCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player)) {
+        // 管理员子命令允许控制台执行
+        if (args.length > 0 && args[0].equalsIgnoreCase("reload")) {
+            handleReload(sender);
+            return true;
+        }
+
+        if (!(sender instanceof Player player)) {
             sender.sendMessage(plugin.getMessageManager().get("general.player-only"));
             return true;
         }
 
-        Player player = (Player) sender;
         GUIManager guiManager = plugin.getGuiManager();
 
         if (args.length == 0) {
@@ -112,16 +119,29 @@ public class TreasureCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
+        if (player.getInventory().firstEmpty() == -1) {
+            player.sendMessage(ChatColor.RED + "背包已满，请先腾出空间再参与寻宝！");
+            return;
+        }
+
         int ticketPrice = treasure.getTicketPrice();
         if (economy.getBalance(player) < ticketPrice) {
             player.sendMessage(msg.get("general.no-money"));
             return;
         }
 
-        economy.withdrawPlayer(player, ticketPrice);
+        // 先扣款：扣款失败就不应该让玩家获得参与资格
+        EconomyResponse withdraw = economy.withdrawPlayer(player, ticketPrice);
+        if (!withdraw.transactionSuccess()) {
+            player.sendMessage(ChatColor.RED + "扣款失败: " + withdraw.errorMessage);
+            return;
+        }
+
         treasureManager.addParticipant(treasure.getId(), player.getUniqueId());
 
-        player.getInventory().addItem(PointerItem.createPointer(treasure));
+        for (ItemStack leftover : player.getInventory().addItem(PointerItem.createPointer(treasure)).values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), leftover);
+        }
         
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
         player.sendMessage(ChatColor.GREEN + "你成功参与了寻宝！");
@@ -175,19 +195,19 @@ public class TreasureCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(msg.get("treasure.info-owner", "owner", treasure.getOwnerName()));
         player.sendMessage(msg.get("treasure.info-coins", "coins", String.valueOf(treasure.getGuaranteedCoins())));
         player.sendMessage(msg.get("treasure.info-time", "time", treasure.getRemainingTimeFormatted()));
-        player.sendMessage(msg.get("treasure.info-participants", "count", String.valueOf(treasure.getParticipants().size())));
+        player.sendMessage(msg.get("treasure.info-participants", "count", String.valueOf(treasure.getParticipantCount())));
         player.sendMessage(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
     }
 
-    private void handleReload(Player player) {
-        if (!player.hasPermission("tloot.admin")) {
-            player.sendMessage(plugin.getMessageManager().get("general.no-permission"));
+    private void handleReload(CommandSender sender) {
+        if (!sender.hasPermission("tloot.admin")) {
+            sender.sendMessage(plugin.getMessageManager().get("general.no-permission"));
             return;
         }
 
         plugin.getConfigManager().reloadConfig();
         plugin.getMessageManager().loadMessages();
-        player.sendMessage(ChatColor.GREEN + "配置文件已重新加载！");
+        sender.sendMessage(ChatColor.GREEN + "配置文件已重新加载！");
     }
 
     private void handleHelp(Player player) {
@@ -206,20 +226,26 @@ public class TreasureCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         List<String> completions = new ArrayList<>();
 
+        if (args.length == 0) {
+            return completions;
+        }
+
         if (args.length == 1) {
-            completions.addAll(Arrays.asList("create", "join", "list", "compass", "my", "info", "reload", "help"));
-        } else if (args.length == 2 && args[0].equalsIgnoreCase("join")) {
-            for (Treasure treasure : plugin.getTreasureManager().getAllTreasures()) {
-                completions.add(treasure.getId());
+            completions.addAll(Arrays.asList("create", "join", "list", "compass", "my", "info", "help"));
+            if (sender.hasPermission("tloot.admin")) {
+                completions.add("reload");
             }
-        } else if (args.length == 2 && args[0].equalsIgnoreCase("info")) {
-            for (Treasure treasure : plugin.getTreasureManager().getAllTreasures()) {
-                completions.add(treasure.getId());
+        } else if (args.length == 2
+                && (args[0].equalsIgnoreCase("join") || args[0].equalsIgnoreCase("info"))) {
+            for (Treasure treasure : plugin.getTreasureManager().treasuresView()) {
+                if (!treasure.isExpired()) {
+                    completions.add(treasure.getId());
+                }
             }
         }
 
         String lastArg = args[args.length - 1].toLowerCase();
-        completions.removeIf(s -> !s.toLowerCase().startsWith(lastArg));
+        completions.removeIf(entry -> !entry.toLowerCase().startsWith(lastArg));
 
         return completions;
     }

@@ -229,7 +229,7 @@ public class RedisSyncManager {
         data.add("commands", commandsArray);
 
         JsonArray participantsArray = new JsonArray();
-        for (UUID uuid : treasure.getParticipants()) {
+        for (UUID uuid : treasure.participantsView()) {
             participantsArray.add(uuid.toString());
         }
         data.add("participants", participantsArray);

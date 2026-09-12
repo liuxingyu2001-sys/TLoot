@@ -4,29 +4,45 @@ import com.tloot.TLoot;
 import com.tloot.data.Treasure;
 import org.bukkit.Location;
 import org.bukkit.Particle;
+import org.bukkit.World;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
 
-import java.util.Collection;
-
+/**
+ * 宝藏光柱特效。
+ *
+ * 修复/优化点：
+ * - 原实现把高度上限写死为 80（忽略世界最大高度），且任务实例不可重复取消；
+ * - 遍历使用只读视图，避免每秒复制整个宝藏集合；
+ * - 光柱参数可配置，并支持关闭以降低粒子开销。
+ */
 public class BeaconEffectManager {
 
     private final TLoot plugin;
-    private BukkitRunnable task;
+    private BukkitTask task;
 
     public BeaconEffectManager(TLoot plugin) {
         this.plugin = plugin;
     }
 
     public void start() {
+        if (task != null) {
+            return;
+        }
+
+        int intervalTicks = Math.max(5, plugin.getConfigManager().getBeaconIntervalTicks());
         task = new BukkitRunnable() {
             @Override
             public void run() {
-                Collection<Treasure> treasures = plugin.getTreasureManager().getAllTreasures();
-                for (Treasure treasure : treasures) {
+                if (!plugin.getConfigManager().isBeaconEnabled()) {
+                    return;
+                }
+
+                for (Treasure treasure : plugin.getTreasureManager().treasuresView()) {
                     if (treasure.isExpired()) {
                         continue;
                     }
-                    
+
                     Location loc = treasure.getLocation();
                     if (loc == null || loc.getWorld() == null) {
                         continue;
@@ -35,33 +51,27 @@ public class BeaconEffectManager {
                     drawBeaconBeam(loc);
                 }
             }
-        };
-        task.runTaskTimer(plugin, 20L, 20L);
+        }.runTaskTimer(plugin, intervalTicks, intervalTicks);
     }
 
     public void stop() {
         if (task != null) {
             task.cancel();
+            task = null;
         }
     }
 
     private void drawBeaconBeam(Location baseLoc) {
-        Location loc = baseLoc.clone();
-        loc.add(0.5, 1, 0);
+        World world = baseLoc.getWorld();
+        int maxHeight = plugin.getConfigManager().getBeaconMaxHeight();
+        int maxY = Math.min(world.getMaxHeight(), baseLoc.getBlockY() + maxHeight);
 
-        int maxY = Math.min(loc.getWorld().getMaxHeight(), 80);  // 限制最大高度，避免过高产生大量粒子
-        int startY = loc.getBlockY() + 1;
+        Location particleLoc = baseLoc.clone().add(0.5, 1, 0.5);
+        int startY = baseLoc.getBlockY() + 1;
 
-        for (int y = startY; y < startY + maxY && y < loc.getWorld().getMaxHeight(); y += 4) {  // 增加间隔，减少粒子数量
-            Location particleLoc = loc.clone().add(0, y - startY, 0);
-
-            loc.getWorld().spawnParticle(
-                Particle.END_ROD,
-                particleLoc,
-                1,
-                0, 0, 0,
-                0
-            );
+        for (int y = startY; y < maxY; y += 4) {
+            particleLoc.setY(y);
+            world.spawnParticle(Particle.END_ROD, particleLoc, 1, 0, 0, 0, 0);
         }
     }
 }

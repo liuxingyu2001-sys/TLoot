@@ -17,32 +17,148 @@ import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemFlag;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class GUIManager {
 
+    /** GUI 类型标识，供各监听器判定事件归属 */
+    public static final String GUI_MAIN = "main";
+    public static final String GUI_CREATE = "create";
+    public static final String GUI_COMPASS = "compass";
+    public static final String GUI_MY_TREASURE = "mytreasure";
+
     private final TLoot plugin;
-    private final Map<UUID, String> playerOpenGUI;
-    private final Map<UUID, Integer> playerCreateCoins;
-    private final Map<UUID, Integer> playerTicketPrice;
-    private final Map<UUID, Integer> playerCompassPage;
-    private final Map<UUID, Integer> playerMyPage;
+    private final Map<UUID, String> playerOpenGUI = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> playerCreateCoins = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> playerTicketPrice = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> playerCompassPage = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> playerMyPage = new ConcurrentHashMap<>();
+
+    /**
+     * 本插件创建的 GUI 实例。
+     * 事件处理改为按「背包实例」判定归属，替代原先按标题字符串匹配的脆弱实现
+     * （标题由配置决定，玩家用自定义语言、颜色代码时都可能匹配失败或误判）。
+     */
+    private final Set<Inventory> trackedInventories = Collections.newSetFromMap(new WeakHashMap<>());
+
+    public static final String GUI_ITEM_KEY = "gui_item";
+    public static final String TREASURE_ID_KEY = "gui_treasure_id";
+
+    /** NamespacedKey 缓存，避免每次构建 GUI 物品都创建对象 */
+    private NamespacedKey guiItemKey;
+    private NamespacedKey guiTreasureIdKey;
 
     public GUIManager(TLoot plugin) {
         this.plugin = plugin;
-        this.playerOpenGUI = new HashMap<>();
-        this.playerCreateCoins = new HashMap<>();
-        this.playerTicketPrice = new HashMap<>();
-        this.playerCompassPage = new HashMap<>();
-        this.playerMyPage = new HashMap<>();
+    }
+
+    private NamespacedKey guiItemKey() {
+        NamespacedKey cached = guiItemKey;
+        if (cached == null) {
+            cached = new NamespacedKey(plugin, GUI_ITEM_KEY);
+            guiItemKey = cached;
+        }
+        return cached;
+    }
+
+    private NamespacedKey guiTreasureIdKey() {
+        NamespacedKey cached = guiTreasureIdKey;
+        if (cached == null) {
+            cached = new NamespacedKey(plugin, TREASURE_ID_KEY);
+            guiTreasureIdKey = cached;
+        }
+        return cached;
+    }
+
+    /**
+     * 把宝藏ID写进物品的 PersistentDataContainer。
+     * 原实现依赖解析显示名称（魔法字符串）来还原ID，任何文案改动都会导致点击失效。
+     */
+    private ItemStack tagTreasure(ItemStack item, Treasure treasure) {
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.getPersistentDataContainer().set(guiTreasureIdKey(), PersistentDataType.STRING, treasure.getId());
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    /**
+     * 登记由本插件创建的背包，事件处理据此判断归属。
+     *
+     * 先记录背包实例，确认界面确实打开成功后才记录界面类型：
+     * 若其它插件取消了 InventoryOpenEvent，旧界面仍停留在屏幕上，
+     * 此时若提前写入新类型，会把旧界面的点击路由到新界面的监听器。
+     */
+    private Inventory track(Inventory inventory, Player player, String guiType) {
+        trackedInventories.add(inventory);
+
+        InventoryView view = player.openInventory(inventory);
+        if (view != null && view.getTopInventory() == inventory) {
+            playerOpenGUI.put(player.getUniqueId(), guiType);
+        } else {
+            playerOpenGUI.remove(player.getUniqueId());
+            plugin.getLogger().warning("界面未能打开（可能被其它插件拦截）: " + guiType);
+        }
+        return inventory;
+    }
+
+
+    /** 该背包是否为本插件创建的 GUI */
+    public boolean isTrackedGUI(Inventory inventory) {
+        return inventory != null && trackedInventories.contains(inventory);
+    }
+
+    /**
+     * 判断玩家当前是否正打开指定类型的本插件 GUI。
+     *
+     * 采用「注册表类型 + 实际背包实例」双重校验：
+     * 仅靠实例集合无法区分是哪一个 GUI（4 个监听器共享同一事件），
+     * 仅靠类型表又可能在外部插件打开其它界面时失真。
+     */
+    public boolean isGUIOpen(Player player, String guiType, InventoryView view) {
+        if (player == null || view == null || guiType == null) {
+            return false;
+        }
+
+        UUID uuid = player.getUniqueId();
+        String open = playerOpenGUI.get(uuid);
+        if (!guiType.equals(open)) {
+            return false;
+        }
+
+        if (!isTrackedGUI(view.getTopInventory())) {
+            // 类型表与实际界面不一致（例如被其它插件替换），修正记录避免影响后续判断
+            playerOpenGUI.remove(uuid, open);
+            return false;
+        }
+
+        return true;
+    }
+
+    /** 读取 GUI 物品上绑定的宝藏ID（首选方式，避免解析显示名称） */
+    public String getTreasureIdFromItem(ItemStack item) {
+        if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) {
+            return null;
+        }
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) {
+            return null;
+        }
+        return meta.getPersistentDataContainer().get(guiTreasureIdKey(), PersistentDataType.STRING);
     }
 
     // ==================== 通用辅助方法 ====================
@@ -91,25 +207,16 @@ public class GUIManager {
         }
         meta.setLore(loreList);
 
-        NamespacedKey key = new NamespacedKey(plugin, "gui_item");
-        meta.getPersistentDataContainer().set(key, PersistentDataType.STRING, "special");
+        meta.getPersistentDataContainer().set(guiItemKey(), PersistentDataType.STRING, "special");
 
         item.setItemMeta(meta);
         return item;
     }
 
-    public static boolean isGuiItem(TLoot plugin, ItemStack item) {
-        if (item == null || !item.hasItemMeta()) {
-            return false;
-        }
-        NamespacedKey key = new NamespacedKey(plugin, "gui_item");
-        return item.getItemMeta().getPersistentDataContainer().has(key, PersistentDataType.STRING);
-    }
-
     /**
      * 装饰性玻璃板填充
      */
-    private ItemStack glassPane(short color) {
+    private ItemStack glassPane() {
         ItemStack glass = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
         ItemMeta meta = glass.getItemMeta();
         meta.setDisplayName(" ");
@@ -125,7 +232,7 @@ public class GUIManager {
                 plugin.getConfigManager().getGuiTitle("main"));
 
         // 顶部和底部玻璃板装饰边框
-        ItemStack border = glassPane((short) 0);
+        ItemStack border = glassPane();
         for (int i = 0; i < 9; i++) {
             inv.setItem(i, border);
         }
@@ -187,8 +294,7 @@ public class GUIManager {
                 ChatColor.DARK_GRAY + "寻宝系统",
                 ChatColor.GRAY + "/treasure help 查看帮助"));
 
-        playerOpenGUI.put(player.getUniqueId(), "main");
-        player.openInventory(inv);
+        track(inv, player, GUI_MAIN);
         playClickSound(player);
     }
 
@@ -200,7 +306,7 @@ public class GUIManager {
                 plugin.getConfigManager().getGuiTitle("create"));
 
         // 装饰边框
-        ItemStack border = glassPane((short) 0);
+        ItemStack border = glassPane();
         for (int i = 0; i < 9; i++) {
             inv.setItem(i, border);
         }
@@ -212,8 +318,7 @@ public class GUIManager {
         inv.setItem(18, border);
 
         fillCreateMenuItems(inv, uuid);
-        playerOpenGUI.put(uuid, "create");
-        player.openInventory(inv);
+        track(inv, player, GUI_CREATE);
         playClickSound(player);
     }
 
@@ -239,8 +344,9 @@ public class GUIManager {
         int gcShiftLeft = plugin.getConfigManager().getGuaranteedCoinsShiftLeftClick();
         int gcShiftRight = plugin.getConfigManager().getGuaranteedCoinsShiftRightClick();
 
-        // 计算进度条
-        double coinPercent = (double) (coins - minCoins) / (maxCoins - minCoins);
+        // 计算进度条（maxCoins == minCoins 时避免除零）
+        double range = maxCoins - minCoins;
+        double coinPercent = range > 0 ? (coins - minCoins) / range : 1.0;
         String coinBar = buildProgressBar(coinPercent);
 
         ItemStack coinsItem = createGuiItem(Material.GOLD_INGOT,
@@ -336,7 +442,7 @@ public class GUIManager {
         List<Treasure> treasures = plugin.getTreasureManager()
                 .getAvailableTreasures(player.getUniqueId());
 
-        int guiSize = plugin.getConfigManager().getGuiSize("compass");
+        int guiSize = normalizeGuiSize(plugin.getConfigManager().getGuiSize("compass"));
         String guiTitle = plugin.getConfigManager().getGuiTitle("compass");
         Inventory inv = Bukkit.createInventory(null, guiSize, guiTitle);
 
@@ -363,7 +469,7 @@ public class GUIManager {
                     ? ChatColor.LIGHT_PURPLE + "类型: " + ChatColor.GOLD + "系统宝藏"
                     : ChatColor.LIGHT_PURPLE + "类型: " + ChatColor.AQUA + "玩家宝藏";
 
-            int participantCount = treasure.getParticipants().size();
+            int participantCount = treasure.getParticipantCount();
             String participantColor;
             if (participantCount >= 5) {
                 participantColor = ChatColor.GREEN.toString();
@@ -386,7 +492,7 @@ public class GUIManager {
                     "",
                     ChatColor.YELLOW + "点击领取寻宝指针！");
 
-            inv.setItem(i - startIndex, treasureItem);
+            inv.setItem(i - startIndex, tagTreasure(treasureItem, treasure));
         }
 
         // 底部导航栏
@@ -429,8 +535,7 @@ public class GUIManager {
         inv.setItem(guiSize - 8, back);
 
         setCompassPage(player.getUniqueId(), page);
-        playerOpenGUI.put(player.getUniqueId(), "compass");
-        player.openInventory(inv);
+        track(inv, player, GUI_COMPASS);
         playClickSound(player);
     }
 
@@ -442,10 +547,15 @@ public class GUIManager {
         List<Treasure> participatingTreasures = plugin.getTreasureManager()
                 .getTreasuresByParticipant(player.getUniqueId());
 
-        // 合并列表：先我发起的，再我参与的
-        List<Treasure> allMyTreasures = new ArrayList<>();
-        allMyTreasures.addAll(ownedTreasures);
-        allMyTreasures.addAll(participatingTreasures);
+        // 合并列表：先我发起的，再我参与的；按ID去重，避免同一宝藏出现两次
+        Map<String, Treasure> merged = new LinkedHashMap<>();
+        for (Treasure treasure : ownedTreasures) {
+            merged.put(treasure.getId(), treasure);
+        }
+        for (Treasure treasure : participatingTreasures) {
+            merged.putIfAbsent(treasure.getId(), treasure);
+        }
+        List<Treasure> allMyTreasures = new ArrayList<>(merged.values());
 
         int guiSize = 54;
         String guiTitle = ChatColor.DARK_GRAY + "我的寻宝";
@@ -469,7 +579,7 @@ public class GUIManager {
 
             ItemStack treasureItem;
             if (isOwner) {
-                int pCount = treasure.getParticipants().size();
+                int pCount = treasure.getParticipantCount();
                 String countColor = pCount > 0 ? ChatColor.GREEN.toString() : ChatColor.GRAY.toString();
 
                 treasureItem = createGuiItem(Material.CHEST,
@@ -503,7 +613,7 @@ public class GUIManager {
                         ChatColor.YELLOW + "点击重新获取指针！");
             }
 
-            inv.setItem(slotOffset, treasureItem);
+            inv.setItem(slotOffset, tagTreasure(treasureItem, treasure));
             slotOffset++;
         }
 
@@ -548,8 +658,7 @@ public class GUIManager {
         }
 
         setMyPage(player.getUniqueId(), page);
-        playerOpenGUI.put(player.getUniqueId(), "mytreasure");
-        player.openInventory(inv);
+        track(inv, player, GUI_MY_TREASURE);
         playClickSound(player);
     }
 
@@ -577,7 +686,7 @@ public class GUIManager {
                 String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
                 player.sendMessage(ChatColor.GOLD + "宝藏 #" + treasure.getId() + " " +
                         ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName + " " +
-                        ChatColor.GRAY + "参与人数: " + ChatColor.WHITE + treasure.getParticipants().size() + " " +
+                        ChatColor.GRAY + "参与人数: " + ChatColor.WHITE + treasure.getParticipantCount() + " " +
                         ChatColor.GRAY + "剩余时间: " + ChatColor.RED + treasure.getRemainingTimeFormatted());
             }
         }
@@ -602,6 +711,20 @@ public class GUIManager {
 
     // ==================== 进度条工具 ====================
 
+    /**
+     * 背包尺寸必须是 9 的倍数且至少 18 格（9 格留给导航栏），
+     * 否则 itemsPerPage 会小于等于 0，分页计算出错甚至抛异常。
+     */
+    private static int normalizeGuiSize(int size) {
+        if (size < 18) {
+            return 18;
+        }
+        if (size > 54) {
+            return 54;
+        }
+        return size - (size % 9);
+    }
+
     private String buildProgressBar(double percent) {
         int barLength = 20;
         int filled = (int) (barLength * Math.max(0, Math.min(1, percent)));
@@ -624,12 +747,9 @@ public class GUIManager {
 
     // ==================== Getter/Setter ====================
 
-    public String getOpenGUI(UUID uuid) {
-        return playerOpenGUI.get(uuid);
-    }
-
     public int getCreateCoins(UUID uuid) {
-        return playerCreateCoins.getOrDefault(uuid, plugin.getConfigManager().getMinGuaranteedCoins());
+        Integer value = playerCreateCoins.get(uuid);
+        return value != null ? value : plugin.getConfigManager().getMinGuaranteedCoins();
     }
 
     public void setCreateCoins(UUID uuid, int coins) {
@@ -649,8 +769,8 @@ public class GUIManager {
     }
 
     public int getTicketPrice(UUID uuid) {
-        int minTicketPrice = plugin.getConfigManager().getMinTicketPrice();
-        return playerTicketPrice.getOrDefault(uuid, minTicketPrice);
+        Integer value = playerTicketPrice.get(uuid);
+        return value != null ? value : plugin.getConfigManager().getMinTicketPrice();
     }
 
     public void setTicketPrice(UUID uuid, int price) {
@@ -674,22 +794,40 @@ public class GUIManager {
         playerTicketPrice.remove(uuid);
     }
 
-    public void removePlayer(UUID uuid) {
+    /**
+     * 玩家退出时清理该玩家的全部会话状态。
+     * 原实现只在特定 GUI 的关闭事件里清理，玩家若在「发起寻宝」界面里调整金额后直接退出，
+     * 其保底金币/参与费用记录会永久留在 Map 中（按 UUID 累积，长期运行即内存泄漏）。
+     */
+    public void handlePlayerQuit(UUID uuid) {
         playerOpenGUI.remove(uuid);
         playerCompassPage.remove(uuid);
         playerMyPage.remove(uuid);
+        playerCreateCoins.remove(uuid);
+        playerTicketPrice.remove(uuid);
     }
 
     public int getCompassPage(UUID uuid) {
-        return playerCompassPage.getOrDefault(uuid, 1);
+        Integer value = playerCompassPage.get(uuid);
+        return value != null ? value : 1;
     }
 
     public void setCompassPage(UUID uuid, int page) {
         playerCompassPage.put(uuid, page);
     }
 
+    public void clearAll() {
+        playerOpenGUI.clear();
+        playerCreateCoins.clear();
+        playerTicketPrice.clear();
+        playerCompassPage.clear();
+        playerMyPage.clear();
+        trackedInventories.clear();
+    }
+
     public int getMyPage(UUID uuid) {
-        return playerMyPage.getOrDefault(uuid, 1);
+        Integer value = playerMyPage.get(uuid);
+        return value != null ? value : 1;
     }
 
     public void setMyPage(UUID uuid, int page) {
@@ -700,16 +838,20 @@ public class GUIManager {
 
     public void giveTreasureSign(Player player) {
         int guaranteedCoins = getCreateCoins(player.getUniqueId());
-        int ticketPrice = getTicketPrice(player.getUniqueId());
-        int minTicketPrice = plugin.getConfigManager().getMinTicketPrice();
+        int ticketPrice = Math.max(getTicketPrice(player.getUniqueId()),
+                plugin.getConfigManager().getMinTicketPrice());
 
-        if (ticketPrice < minTicketPrice) {
-            ticketPrice = minTicketPrice;
-            setTicketPrice(player.getUniqueId(), ticketPrice);  // 修复：同步更新存储的值
+        // 背包没有空位时不发放，避免告示牌直接掉在地上被他人捡走
+        if (player.getInventory().firstEmpty() == -1) {
+            player.sendMessage(ChatColor.RED + "背包已满，无法获得寻宝告示牌！");
+            playFailSound(player);
+            return;
         }
 
         ItemStack sign = TreasureSignItem.createSign(guaranteedCoins, ticketPrice);
-        player.getInventory().addItem(sign);
+        for (ItemStack leftover : player.getInventory().addItem(sign).values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), leftover);
+        }
 
         player.sendMessage(ChatColor.GREEN + "你获得了一个寻宝告示牌！");
         player.sendMessage(ChatColor.GRAY + "左键点击箱子放置告示牌，箱子将成为宝藏。");

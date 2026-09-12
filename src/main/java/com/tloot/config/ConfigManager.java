@@ -3,6 +3,7 @@ package com.tloot.config;
 import com.tloot.TLoot;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.ArrayList;
@@ -46,15 +47,17 @@ public class ConfigManager {
     }
 
     private void loadAllowedWorlds() {
-        allowedWorlds = config.getStringList("allowed-worlds");
+        allowedWorlds = new ArrayList<>(config.getStringList("allowed-worlds"));
     }
 
     private void loadWorldNames() {
         worldNames.clear();
-        if (config.contains("world-names")) {
-            for (String key : config.getConfigurationSection("world-names").getKeys(false)) {
-                worldNames.put(key, config.getString("world-names." + key));
-            }
+        ConfigurationSection section = config.getConfigurationSection("world-names");
+        if (section == null) {
+            return;
+        }
+        for (String key : section.getKeys(false)) {
+            worldNames.put(key, config.getString("world-names." + key));
         }
     }
 
@@ -67,10 +70,6 @@ public class ConfigManager {
 
     public String getWorldDisplayName(String worldName) {
         return worldNames.getOrDefault(worldName, worldName);
-    }
-
-    public int getTicketPrice() {
-        return config.getInt("settings.ticket-price", 500);
     }
 
     public int getClaimDistance() {
@@ -95,6 +94,21 @@ public class ConfigManager {
 
     public boolean isPointerActionBarEnabled() {
         return config.getBoolean("pointer.enable-actionbar", true);
+    }
+
+    // ==================== 光柱特效 ====================
+
+    public boolean isBeaconEnabled() {
+        return config.getBoolean("pointer.beacon.enabled", true);
+    }
+
+    public int getBeaconIntervalTicks() {
+        return config.getInt("pointer.beacon.interval-ticks", 20);
+    }
+
+    /** 光柱相对宝藏的最大高度（格），避免在世界最高处生成大量粒子 */
+    public int getBeaconMaxHeight() {
+        return config.getInt("pointer.beacon.max-height", 80);
     }
 
     public int getGuiSize(String guiName) {
@@ -213,10 +227,11 @@ public class ConfigManager {
 
     private void loadAutoTreasureWorlds() {
         autoTreasureWorldRanges.clear();
-        if (!config.contains("auto-treasure.worlds")) {
+        ConfigurationSection section = config.getConfigurationSection("auto-treasure.worlds");
+        if (section == null) {
             return;
         }
-        for (String worldName : config.getConfigurationSection("auto-treasure.worlds").getKeys(false)) {
+        for (String worldName : section.getKeys(false)) {
             String base = "auto-treasure.worlds." + worldName;
             int minX = config.getInt(base + ".min-x", -5000);
             int maxX = config.getInt(base + ".max-x", 5000);
