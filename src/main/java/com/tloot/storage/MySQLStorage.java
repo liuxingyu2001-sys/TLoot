@@ -2,6 +2,7 @@ package com.tloot.storage;
 
 import com.tloot.TLoot;
 import com.tloot.data.Treasure;
+import com.tloot.util.TreasureBlocks;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.bukkit.Bukkit;
@@ -159,12 +160,20 @@ public class MySQLStorage implements StorageBackend {
              ResultSet rs = ps.executeQuery()) {
 
             int skipped = 0;
+            int expired = 0;
             while (rs.next()) {
                 try {
                     Treasure treasure = fromResultSet(rs);
-                    if (treasure != null && !treasure.isExpired()) {
-                        result.put(treasure.getId(), treasure);
+                    if (treasure == null) {
+                        continue;
                     }
+                    if (treasure.isExpired()) {
+                        // 记录已过期但箱子可能仍残留在世界里：登记后在区块加载时回收
+                        TreasureBlocks.scheduleCleanup(treasure.getLocation());
+                        expired++;
+                        continue;
+                    }
+                    result.put(treasure.getId(), treasure);
                 } catch (Exception e) {
                     // 单行数据损坏（例如 uuid 字段被手工改坏）不应让整份宝藏数据加载失败
                     skipped++;
@@ -173,6 +182,9 @@ public class MySQLStorage implements StorageBackend {
             }
             if (skipped > 0) {
                 plugin.getLogger().warning("共跳过 " + skipped + " 条损坏的宝藏记录");
+            }
+            if (expired > 0) {
+                plugin.getLogger().info("已清理 " + expired + " 条过期宝藏记录（残留宝箱将在区块加载时清理）");
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("无法加载宝藏数据: " + e.getMessage());

@@ -2,6 +2,7 @@ package com.tloot.storage;
 
 import com.tloot.TLoot;
 import com.tloot.data.Treasure;
+import com.tloot.util.TreasureBlocks;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -94,6 +95,8 @@ public class YamlStorage implements StorageBackend {
                 continue;
             }
             if (treasure.isExpired()) {
+                // 记录已过期但箱子可能still残留在世界里：登记后在区块加载时回收
+                TreasureBlocks.scheduleCleanup(treasure.getLocation());
                 skipped++;
                 continue;
             }
@@ -101,7 +104,7 @@ public class YamlStorage implements StorageBackend {
         }
 
         if (skipped > 0) {
-            plugin.getLogger().info("已跳过 " + skipped + " 条过期或损坏的宝藏记录（对应宝箱会在区块加载后被清理）");
+            plugin.getLogger().info("已跳过 " + skipped + " 条过期或损坏的宝藏记录（残留宝箱将在区块加载时清理）");
         }
         return result;
     }

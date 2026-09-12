@@ -185,6 +185,7 @@ TLoot/
 │   ├── listener/
 │   │   ├── PointerListener.java         # 指针追踪（指南针/ActionBar/粒子）
 │   │   ├── PlayerSessionListener.java   # 玩家退出清理、进服回收失效指针
+│   │   ├── TreasureChunkCleanupListener.java # 区块加载时回收残留宝箱
 │   │   ├── TreasureListener.java        # 宝箱交互、领取与箱子保护
 │   │   ├── TreasureSignListener.java    # 告示牌放置并发起寻宝
 │   │   └── gui/
@@ -227,6 +228,8 @@ mvn clean package
   （`PlayerSessionListener`）与插件关闭时清理，避免按 UUID 累积。
 - **指针回收**：宝藏被领取/过期/移除（含跨服事件）时，`TreasureManager` 会回收所有在线玩家背包中对应的指针。
 - **跨服一致性**：Redis 事件到达后由主线程执行，并清理本服可能残留的同位置箱子（`util/TreasureBlocks`）。
+- **残留宝箱兜底回收**：目标区块未加载时无法立即移除箱子，会登记为待清理，
+  由 `TreasureChunkCleanupListener` 在区块加载（玩家靠近）时回收；启动时跳过的过期记录同样会登记。
 
 ## 作者
 

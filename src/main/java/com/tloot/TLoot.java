@@ -8,6 +8,7 @@ import com.tloot.data.TreasureManager;
 import com.tloot.gui.GUIManager;
 import com.tloot.listener.PlayerSessionListener;
 import com.tloot.listener.PointerListener;
+import com.tloot.listener.TreasureChunkCleanupListener;
 import com.tloot.listener.TreasureListener;
 import com.tloot.listener.TreasureSignListener;
 import com.tloot.listener.gui.CompassGUIListener;
@@ -129,6 +130,7 @@ public class TLoot extends JavaPlugin {
         pluginManager.registerEvents(new PlayerSessionListener(this), this);
         pluginManager.registerEvents(new TreasureListener(this), this);
         pluginManager.registerEvents(new TreasureSignListener(this), this);
+        pluginManager.registerEvents(new TreasureChunkCleanupListener(this), this);
     }
 
     private void startAutoTreasureTask() {

@@ -6,6 +6,11 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
 
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+
 /**
  * 宝藏方块的公共工具。
  *
@@ -16,7 +21,78 @@ import org.bukkit.block.Chest;
  */
 public final class TreasureBlocks {
 
+    /**
+     * 待清理的残留宝箱：区块未加载时无法安全移除，记录 chunkKey -> 坐标，
+     * 由 {@link com.tloot.listener.TreasureChunkCleanupListener} 在区块加载时回收。
+     */
+    private static final Map<Long, List<Location>> PENDING = new ConcurrentHashMap<>();
+    /** 单个区块最多记录的待清理箱子数（正常情况为个位数） */
+    private static final int MAX_PENDING_PER_CHUNK = 64;
+
     private TreasureBlocks() {
+    }
+
+    /**
+     * 记录一个待清理的宝箱位置（区块当前未加载）。
+     * 单个区块的记录数有上限，避免异常情况下无界增长。
+     */
+    public static void scheduleCleanup(Location location) {
+        if (location == null || location.getWorld() == null) {
+            return;
+        }
+
+        long key = chunkKey(location);
+        List<Location> locations = PENDING.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>());
+        if (locations.size() >= MAX_PENDING_PER_CHUNK) {
+            return;
+        }
+        for (Location existing : locations) {
+            if (existing.equals(location)) {
+                return;
+            }
+        }
+        locations.add(location.clone());
+    }
+
+    /**
+     * 处理某个区块加载：回收记录在案的残留宝箱。
+     *
+     * @return 实际移除的箱子数量
+     */
+    public static int cleanupOnChunkLoad(org.bukkit.Chunk chunk) {
+        if (chunk == null) {
+            return 0;
+        }
+
+        long key = chunkKey(chunk.getWorld().getName(), chunk.getX(), chunk.getZ());
+        List<Location> locations = PENDING.remove(key);
+        if (locations == null || locations.isEmpty()) {
+            return 0;
+        }
+
+        int removed = 0;
+        for (Location location : locations) {
+            if (removeChest(location)) {
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    /** 世界名 + 区块坐标的打包键 */
+    public static long chunkKey(Location location) {
+        return chunkKey(location.getWorld().getName(), location.getBlockX() >> 4, location.getBlockZ() >> 4);
+    }
+
+    private static long chunkKey(String worldName, int chunkX, int chunkZ) {
+        long hash = worldName.hashCode();
+        hash = hash * 31L + chunkX;
+        hash = hash * 31L + chunkZ;
+        return hash;
+    }
+
+    public static void clearPending() {
+        PENDING.clear();
     }
 
     /**
@@ -38,6 +114,8 @@ public final class TreasureBlocks {
         }
 
         if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
+            // 区块未加载：登记，等区块加载（玩家靠近）后再清理
+            scheduleCleanup(location);
             return false;
         }
 
