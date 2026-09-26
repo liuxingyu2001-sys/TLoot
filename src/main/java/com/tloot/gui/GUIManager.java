@@ -836,7 +836,7 @@ public class GUIManager {
 
     // ==================== 工具方法 ====================
 
-    public void giveTreasureSign(Player player) {
+    public boolean giveTreasureSign(Player player) {
         int guaranteedCoins = getCreateCoins(player.getUniqueId());
         int ticketPrice = Math.max(getTicketPrice(player.getUniqueId()),
                 plugin.getConfigManager().getMinTicketPrice());
@@ -845,7 +845,7 @@ public class GUIManager {
         if (player.getInventory().firstEmpty() == -1) {
             player.sendMessage(ChatColor.RED + "背包已满，无法获得寻宝告示牌！");
             playFailSound(player);
-            return;
+            return false;
         }
 
         ItemStack sign = TreasureSignItem.createSign(guaranteedCoins, ticketPrice);
@@ -857,5 +857,6 @@ public class GUIManager {
         player.sendMessage(ChatColor.GRAY + "左键点击箱子放置告示牌，箱子将成为宝藏。");
 
         clearCreateData(player.getUniqueId());
+        return true;
     }
 }

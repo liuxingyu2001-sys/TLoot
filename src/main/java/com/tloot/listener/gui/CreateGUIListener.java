@@ -30,9 +30,10 @@ public class CreateGUIListener extends AbstractGUIListener {
             case 15 -> adjustTicketPrice(player, guiManager, configManager, clickType);
             case 13 -> {
                 if (clickType == ClickType.LEFT || clickType == ClickType.RIGHT) {
-                    guiManager.giveTreasureSign(player);
-                    GUIManager.playSuccessSound(player);
-                    player.closeInventory();
+                    if (guiManager.giveTreasureSign(player)) {
+                        GUIManager.playSuccessSound(player);
+                        player.closeInventory();
+                    }
                 }
             }
             case 22 -> {

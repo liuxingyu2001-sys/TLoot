@@ -4,6 +4,7 @@ import com.tloot.TLoot;
 import com.tloot.data.Treasure;
 import com.tloot.data.TreasureManager;
 import com.tloot.item.TreasureSignItem;
+import com.tloot.integration.LiuChatBridge;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.ComponentBuilder;
 import net.md_5.bungee.api.chat.HoverEvent;
@@ -144,12 +145,7 @@ public class TreasureSignListener implements Listener {
     private void broadcastTreasureCreated(Treasure treasure) {
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
 
-        for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
-            if (onlinePlayer.getUniqueId().equals(treasure.getOwnerUuid())) {
-                continue;
-            }
-
-            TextComponent message = new TextComponent(
+        TextComponent message = new TextComponent(
                     plugin.getMessageManager().get("prefix")
                             + ChatColor.GREEN + " " + treasure.getOwnerName() + " 发起了一个寻宝！ "
                             + ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins() + " "
@@ -160,7 +156,12 @@ public class TreasureSignListener implements Listener {
             message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
                     new ComponentBuilder(ChatColor.GREEN + "点击参与此寻宝").create()));
 
-            onlinePlayer.spigot().sendMessage(message);
+        if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null), message)) {
+            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+                if (!onlinePlayer.getUniqueId().equals(treasure.getOwnerUuid())) {
+                    onlinePlayer.spigot().sendMessage(message);
+                }
+            }
         }
     }
 }

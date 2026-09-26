@@ -26,10 +26,8 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -57,17 +55,12 @@ public class MySQLStorage implements StorageBackend {
                     + "participants=VALUES(participants)";
 
     private HikariDataSource dataSource;
-    /**
-     * 单线程异步写库，有界队列。
-     *
-     * 旧实现使用无界队列（Executors.newSingleThreadExecutor）：数据库卡顿时任务会无限堆积，
-     * 每个任务还持有 Treasure 强引用，长时间阻塞会持续占用内存。
-     * 队列满说明数据库已严重滞后，此时丢弃最旧的待写任务（都是整条记录的全量 upsert，
-     * 丢弃旧任务不会丢数据）比让服务器主线程执行 JDBC 写入更安全，同时记录日志便于排查。
-     */
+    /** Bounded queue rejects writes on overload instead of silently losing a creation or deletion. */
     private ExecutorService executor;
-    /** 不可被队列溢出丢弃的任务（删除操作） */
-    private final Set<Runnable> criticalTasks = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+    private void enqueue(Runnable task) {
+        executor.execute(task);
+    }
 
     public MySQLStorage(TLoot plugin, String host, int port, String database,
                         String username, String password, String tablePrefix, int poolSize) {
@@ -85,19 +78,7 @@ public class MySQLStorage implements StorageBackend {
     public void init() {
         executor = new ThreadPoolExecutor(1, 1, 60L, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(2048),
-                new ThreadPoolExecutor.DiscardOldestPolicy() {
-                    @Override
-                    public void rejectedExecution(Runnable task, ThreadPoolExecutor pool) {
-                        // 丢弃最旧的任务以释放队列空间；但删除类任务必须保留：
-                        // 丢弃一条 delete 会让已被领取/过期的宝藏残留在数据库中，
-                        // 重启后会被重新加载，玩家甚至可能为它再付一次参与费用。
-                        if (dropOldestNonCritical(pool.getQueue())) {
-                            plugin.getLogger().warning("数据库写入队列已满，已丢弃一条较早的宝藏变更（请检查数据库性能）");
-                        } else if (!pool.getQueue().offer(task)) {
-                            plugin.getLogger().severe("数据库写入队列已满且无法丢弃任务，已放弃一条待写入的宝藏变更");
-                        }
-                    }
-                });
+                new ThreadPoolExecutor.AbortPolicy());
 
         createDatabase();
 
@@ -152,7 +133,7 @@ public class MySQLStorage implements StorageBackend {
              Statement stmt = conn.createStatement()) {
             stmt.executeUpdate(sql);
         } catch (SQLException e) {
-            plugin.getLogger().severe("无法创建数据表: " + e.getMessage());
+            throw new IllegalStateException("无法创建宝藏数据表", e);
         }
     }
 
@@ -197,7 +178,7 @@ public class MySQLStorage implements StorageBackend {
                 plugin.getLogger().info("已清理 " + expired + " 条过期宝藏记录（残留宝箱将在区块加载时清理）");
             }
         } catch (SQLException e) {
-            plugin.getLogger().severe("无法加载宝藏数据: " + e.getMessage());
+            throw new IllegalStateException("无法加载宝藏数据", e);
         }
         return result;
     }
@@ -214,14 +195,12 @@ public class MySQLStorage implements StorageBackend {
             itemsBase64 = itemStacksToBase64(treasure.getItems());
         } catch (RuntimeException e) {
             // 不能写入 NULL：那会把数据库里原有的奖励物品覆盖掉
-            plugin.getLogger().severe("宝藏 " + treasure.getId() + " 的物品无法序列化，已跳过本次保存: "
-                    + e.getMessage());
-            return;
+            throw new IllegalStateException("无法序列化宝藏物品: " + treasure.getId(), e);
         }
         String commands = String.join("\n", treasure.getCommands());
         String participants = joinParticipants(treasure.getParticipants());
 
-        executor.submit(() -> {
+        enqueue(() -> {
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(upsertSql())) {
                 bind(ps, treasure, itemsBase64, commands, participants);
@@ -238,7 +217,7 @@ public class MySQLStorage implements StorageBackend {
             return;
         }
 
-        executor.submit(critical(() -> {
+        enqueue(() -> {
             String sql = "DELETE FROM " + tablePrefix + "treasures WHERE id = ?";
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -247,29 +226,7 @@ public class MySQLStorage implements StorageBackend {
             } catch (SQLException e) {
                 plugin.getLogger().severe("无法删除宝藏 " + id + ": " + e.getMessage());
             }
-        }));
-    }
-
-    /**
-     * 标记为不可丢弃的任务。队列满时 {@link #dropOldestNonCritical} 会跳过这些任务，
-     * 保证删除操作最终一定落库（否则重启后已领取的宝藏会"复活"）。
-     * 任务开始执行后即从集合中移除，集合大小始终与队列积压量同阶。
-     */
-    private Runnable critical(Runnable task) {
-        return () -> {
-            criticalTasks.remove(task);
-            task.run();
-        };
-    }
-
-    /** 从队列头部丢弃第一个非关键任务；返回是否成功丢弃 */
-    private boolean dropOldestNonCritical(BlockingQueue<Runnable> queue) {
-        for (Runnable queued : queue) {
-            if (!criticalTasks.contains(queued) && queue.remove(queued)) {
-                return true;
-            }
-        }
-        return false;
+        });
     }
 
     @Override
@@ -278,28 +235,28 @@ public class MySQLStorage implements StorageBackend {
             return;
         }
 
-        List<Treasure> snapshot = new ArrayList<>(treasures);
-        List<String> itemsData = new ArrayList<>(snapshot.size());
-        List<String> commandsData = new ArrayList<>(snapshot.size());
-        List<String> participantsData = new ArrayList<>(snapshot.size());
-        for (Treasure treasure : snapshot) {
+        List<Treasure> snapshot = new ArrayList<>(treasures.size());
+        List<String> itemsData = new ArrayList<>(treasures.size());
+        List<String> commandsData = new ArrayList<>(treasures.size());
+        List<String> participantsData = new ArrayList<>(treasures.size());
+        for (Treasure treasure : treasures) {
             try {
-                itemsData.add(itemStacksToBase64(treasure.getItems()));
+                String serialized = itemStacksToBase64(treasure.getItems());
+                snapshot.add(treasure);
+                itemsData.add(serialized);
+                commandsData.add(String.join("\n", treasure.getCommands()));
+                participantsData.add(joinParticipants(treasure.getParticipants()));
             } catch (RuntimeException e) {
-                // 写入 NULL 会覆盖数据库中已有的奖励物品，因此整条记录跳过（原因见上）
                 plugin.getLogger().severe("宝藏 " + treasure.getId() + " 的物品无法序列化，已跳过该记录: "
                         + e.getMessage());
-                continue;
             }
-            commandsData.add(String.join("\n", treasure.getCommands()));
-            participantsData.add(joinParticipants(treasure.getParticipants()));
         }
 
         if (snapshot.isEmpty()) {
             return;
         }
 
-        executor.submit(() -> {
+        enqueue(() -> {
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(upsertSql())) {
                 boolean originalAutoCommit = conn.getAutoCommit();

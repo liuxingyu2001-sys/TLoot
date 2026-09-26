@@ -205,8 +205,7 @@ public class TreasureCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        plugin.getConfigManager().reloadConfig();
-        plugin.getMessageManager().loadMessages();
+        plugin.reloadSettings();
         sender.sendMessage(ChatColor.GREEN + "配置文件已重新加载！");
     }
 

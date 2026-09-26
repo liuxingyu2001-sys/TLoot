@@ -1,6 +1,7 @@
 package com.tloot.data;
 
 import com.tloot.TLoot;
+import com.tloot.integration.LiuChatBridge;
 import com.tloot.item.PointerItem;
 import com.tloot.storage.StorageBackend;
 import com.tloot.sync.RedisSyncManager;
@@ -59,8 +60,7 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         try {
             loaded = storage.loadAll();
         } catch (Exception e) {
-            plugin.getLogger().severe("加载宝藏数据失败: " + e.getMessage());
-            return;
+            throw new IllegalStateException("加载宝藏数据失败", e);
         }
 
         treasures.clear();
@@ -147,10 +147,19 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         index(treasure);
 
         if (storage != null) {
-            storage.save(treasure);
+            try {
+                storage.save(treasure);
+            } catch (RuntimeException e) {
+                unindex(id);
+                throw e;
+            }
         }
         if (syncManager != null) {
-            syncManager.publishCreate(treasure);
+            try {
+                syncManager.publishCreate(treasure);
+            } catch (RuntimeException e) {
+                plugin.getLogger().warning("宝藏 #" + id + " 已创建，但 Redis 广播失败: " + e.getMessage());
+            }
         }
 
         return treasure;
@@ -170,27 +179,31 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
     }
 
     public void claimTreasure(String id, String claimerName) {
-        Treasure treasure = unindex(id);
+        Treasure treasure = treasures.get(id);
+        if (treasure == null) return;
         if (storage != null) {
             storage.delete(id);
         }
+        unindex(id);
         if (syncManager != null) {
-            String ownerName = treasure != null ? treasure.getOwnerName() : "未知";
-            syncManager.publishClaim(id, claimerName, ownerName);
+            try {
+                syncManager.publishClaim(id, claimerName, treasure.getOwnerName());
+            } catch (RuntimeException e) {
+                plugin.getLogger().warning("宝藏领取已完成，但 Redis 广播失败: " + e.getMessage());
+            }
         }
     }
 
     public void expireTreasure(String id) {
-        Treasure treasure = unindex(id);
-        if (storage != null) {
-            storage.delete(id);
-        }
+        Treasure treasure = treasures.get(id);
+        if (treasure == null) return;
+        if (storage != null) storage.delete(id);
+        unindex(id);
+        TreasureBlocks.removeChest(treasure.getLocation());
         if (syncManager != null) {
             syncManager.publishExpire(id);
         }
-        if (treasure != null) {
-            removePointers(treasure);
-        }
+        removePointers(treasure);
     }
 
     /**
@@ -236,6 +249,9 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
 
         index(treasure);
 
+        if (LiuChatBridge.available()) {
+            return;
+        }
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
         boolean isSystem = SYSTEM_OWNER_UUID.equals(treasure.getOwnerUuid());
 
@@ -253,11 +269,12 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
                 new ComponentBuilder(ChatColor.GREEN + "点击参与此寻宝").create()));
 
-        for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
-            if (!isSystem && onlinePlayer.getUniqueId().equals(treasure.getOwnerUuid())) {
-                continue;
+        Player carrier = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
+        if (!LiuChatBridge.broadcast(carrier, message)) {
+            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+                if (!isSystem && onlinePlayer.getUniqueId().equals(treasure.getOwnerUuid())) continue;
+                onlinePlayer.spigot().sendMessage(message);
             }
-            onlinePlayer.spigot().sendMessage(message);
         }
     }
 
@@ -279,10 +296,13 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
             removePointers(treasure);
         }
 
-        plugin.getServer().broadcastMessage(
-                plugin.getMessageManager().get("prefix")
-                        + "§e" + claimerName + " §a找到了 §e" + ownerName + " §a发起的宝藏！"
-        );
+        if (LiuChatBridge.available()) return;
+        String announcement = plugin.getMessageManager().get("prefix")
+                + "§e" + claimerName + " §a找到了 §e" + ownerName + " §a发起的宝藏！";
+        if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null),
+                new TextComponent(announcement))) {
+            plugin.getServer().broadcastMessage(announcement);
+        }
     }
 
     @Override
@@ -390,16 +410,11 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         }
 
         for (Treasure treasure : expired) {
-            String id = treasure.getId();
-            unindex(id);
-            TreasureBlocks.removeChest(treasure.getLocation());
-            if (storage != null) {
-                storage.delete(id);
+            try {
+                expireTreasure(treasure.getId());
+            } catch (RuntimeException e) {
+                plugin.getLogger().severe("清理过期宝藏 #" + treasure.getId() + " 失败: " + e.getMessage());
             }
-            if (syncManager != null) {
-                syncManager.publishExpire(id);
-            }
-            removePointers(treasure);
         }
     }
 

@@ -202,6 +202,10 @@ public class YamlStorage implements StorageBackend {
         }
     }
 
+    public void discardOnClose() {
+        treasuresSupplier = null;
+    }
+
     @Override
     public void close() {
         if (flushTask != null) {

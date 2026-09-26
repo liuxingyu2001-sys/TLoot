@@ -4,6 +4,8 @@ import com.tloot.TLoot;
 import com.tloot.data.Treasure;
 import com.tloot.data.TreasureManager;
 import com.tloot.item.PointerItem;
+import com.tloot.integration.LiuChatBridge;
+import net.md_5.bungee.api.chat.TextComponent;
 import com.tloot.util.TreasureBlocks;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
@@ -118,7 +120,11 @@ public class TreasureListener implements Listener {
         if (treasure.isExpired()) {
             player.sendMessage(plugin.getMessageManager().get("expire.treasure-expired"));
             player.getInventory().setItemInMainHand(null);
-            treasureManager().expireTreasure(treasureId);
+            try {
+                treasureManager().expireTreasure(treasureId);
+            } catch (RuntimeException e) {
+                plugin.getLogger().severe("清理过期宝藏失败: " + e.getMessage());
+            }
             return;
         }
 
@@ -151,9 +157,14 @@ public class TreasureListener implements Listener {
             return false;
         }
 
+        event.setCancelled(true);
         if (treasure.isExpired()) {
             player.sendMessage(ChatColor.RED + "这个宝藏已经过期了！");
-            treasureManager().expireTreasure(treasure.getId());
+            try {
+                treasureManager().expireTreasure(treasure.getId());
+            } catch (RuntimeException e) {
+                plugin.getLogger().severe("清理过期宝藏失败: " + e.getMessage());
+            }
             return true;
         }
 
@@ -183,11 +194,15 @@ public class TreasureListener implements Listener {
         TreasureManager treasureManager = treasureManager();
         String treasureId = treasure.getId();
 
-        // 1) 先清空箱子并移除箱子方块，避免"钱已到账、宝藏还在"的漏洞
+        // 注销失败时保留箱子和奖励供重试。
+        try {
+            treasureManager.claimTreasure(treasureId, player.getName());
+        } catch (RuntimeException e) {
+            plugin.getLogger().severe("领取宝藏 #" + treasureId + " 失败: " + e.getMessage());
+            player.sendMessage(ChatColor.RED + "领取失败，请稍后重试。");
+            return;
+        }
         TreasureBlocks.removeChest(chestBlock.getLocation());
-
-        // 2) 注销宝藏（内存 + 存储 + 跨服广播）
-        treasureManager.claimTreasure(treasureId, player.getName());
 
         // 3) 先回收指针，再发放奖励：否则奖励占满背包后，多余的指针会被当成"放不下的奖励"掉在地上
         PointerItem.removePointers(player, treasureId);
@@ -213,9 +228,10 @@ public class TreasureListener implements Listener {
 
         // 本服公告在此发出；其它子服的公告由 Redis 的 onTreasureClaimed 回调发出
         // （不能只依赖回调：Redis 默认关闭时回调根本不会触发，公告会完全消失）
-        plugin.getServer().broadcastMessage(
-                plugin.getMessageManager().get("prefix")
-                        + "§e" + player.getName() + " §a找到了 §e" + treasure.getOwnerName() + " §a发起的宝藏！"
-        );
+        String announcement = plugin.getMessageManager().get("prefix")
+                + "§e" + player.getName() + " §a找到了 §e" + treasure.getOwnerName() + " §a发起的宝藏！";
+        if (!LiuChatBridge.broadcast(player, new TextComponent(announcement))) {
+            plugin.getServer().broadcastMessage(announcement);
+        }
     }
 }

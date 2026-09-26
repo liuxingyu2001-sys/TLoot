@@ -2,6 +2,7 @@ package com.tloot.task;
 
 import com.tloot.TLoot;
 import com.tloot.config.LootEntry;
+import com.tloot.integration.LiuChatBridge;
 import com.tloot.data.Treasure;
 import com.tloot.data.TreasureManager;
 import net.md_5.bungee.api.chat.ClickEvent;
@@ -144,7 +145,13 @@ public class AutoTreasureTask extends BukkitRunnable {
         // 奖励物品只保存在 Treasure 记录中，不物理放入箱子：
         // 否则领取/过期移除箱子时物品会洒落在地上造成重复发放，且可被漏斗抽走
         Block block = chestLoc.getBlock();
-        block.setType(Material.CHEST, false);
+        try {
+            block.setType(Material.CHEST, false);
+        } catch (RuntimeException e) {
+            treasureManager.removeTreasure(treasure.getId());
+            plugin.getLogger().severe("[自动寻宝] 放置箱子失败: " + e.getMessage());
+            return;
+        }
 
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(worldName);
         plugin.getLogger().info("[自动寻宝] 已生成宝藏 #" + treasure.getId()
@@ -308,20 +315,19 @@ public class AutoTreasureTask extends BukkitRunnable {
     private void broadcastTreasure(Treasure treasure) {
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
 
-        for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
-            TextComponent message = new TextComponent(
-                    plugin.getMessageManager().get("prefix") +
-                    ChatColor.GOLD + "【系统寻宝】" +
-                    ChatColor.GREEN + "一个新的宝藏出现了！ " +
-                    ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins() + " " +
-                    ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + treasure.getTicketPrice() + " " +
-                    ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName
-            );
-            message.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/treasure join " + treasure.getId()));
-            message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                    new ComponentBuilder(ChatColor.GREEN + "点击参与此系统寻宝").create()));
-
-            onlinePlayer.spigot().sendMessage(message);
+        TextComponent message = new TextComponent(
+                plugin.getMessageManager().get("prefix") + ChatColor.GOLD + "【系统寻宝】"
+                + ChatColor.GREEN + "一个新的宝藏出现了！ "
+                + ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins() + " "
+                + ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + treasure.getTicketPrice() + " "
+                + ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
+        message.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/treasure join " + treasure.getId()));
+        message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                new ComponentBuilder(ChatColor.GREEN + "点击参与此系统寻宝").create()));
+        if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null), message)) {
+            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+                onlinePlayer.spigot().sendMessage(message);
+            }
         }
     }
 }

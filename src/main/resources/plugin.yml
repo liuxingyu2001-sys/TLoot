@@ -6,7 +6,8 @@ author: liuxingyu2001
 description: 寻宝插件 - 玩家发起寻宝，其他玩家参与寻宝
 depend:
   - Vault
-softdepend: []
+softdepend:
+  - LiuChat
 
 libraries:
   - com.zaxxer:HikariCP:5.1.0

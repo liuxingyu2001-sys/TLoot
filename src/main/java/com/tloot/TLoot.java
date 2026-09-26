@@ -21,6 +21,7 @@ import com.tloot.storage.YamlStorage;
 import com.tloot.sync.RedisSyncManager;
 import com.tloot.task.AutoTreasureTask;
 import com.tloot.task.TreasureExpireTask;
+import com.tloot.util.TreasureBlocks;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -40,6 +41,7 @@ public class TLoot extends JavaPlugin {
     private TreasureExpireTask expireTask;
     private AutoTreasureTask autoTreasureTask;
     private StorageBackend storageBackend;
+    private boolean treasuresLoaded;
     private RedisSyncManager redisSyncManager;
 
     @Override
@@ -89,7 +91,14 @@ public class TLoot extends JavaPlugin {
             redisSyncManager.init(treasureManager);
         }
 
-        treasureManager.loadTreasures();
+        try {
+            treasureManager.loadTreasures();
+            treasuresLoaded = true;
+        } catch (RuntimeException e) {
+            getLogger().severe("宝藏数据加载失败，插件已禁用: " + e.getMessage());
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
 
         guiManager = new GUIManager(this);
 
@@ -134,6 +143,10 @@ public class TLoot extends JavaPlugin {
     }
 
     private void startAutoTreasureTask() {
+        if (autoTreasureTask != null) {
+            autoTreasureTask.cancel();
+            autoTreasureTask = null;
+        }
         if (!configManager.isAutoTreasureEnabled()) {
             return;
         }
@@ -142,10 +155,6 @@ public class TLoot extends JavaPlugin {
         long intervalTicks = intervalMinutes * 60L * 20L;
         long initialDelay = 20L * 20L;
 
-        // 任务实例在重载时会被重新创建，先取消旧实例避免重复生成宝藏
-        if (autoTreasureTask != null) {
-            autoTreasureTask.cancel();
-        }
         autoTreasureTask = new AutoTreasureTask(this);
         autoTreasureTask.runTaskTimer(this, initialDelay, intervalTicks);
         getLogger().info("定时自动寻宝已启用，间隔: " + intervalMinutes + " 分钟（首次 " + (initialDelay / 20) + " 秒后生成）");
@@ -173,18 +182,23 @@ public class TLoot extends JavaPlugin {
         }
 
         // 先落盘再关闭存储后端，避免异步写入被中断导致数据丢失
-        if (treasureManager != null) {
-            treasureManager.saveTreasures();
-        }
         if (redisSyncManager != null) {
             redisSyncManager.shutdown();
             redisSyncManager = null;
         }
+        if (treasureManager != null && treasuresLoaded) {
+            treasureManager.saveTreasures();
+        }
         if (storageBackend != null) {
+            if (!treasuresLoaded && storageBackend instanceof YamlStorage yamlStorage) {
+                yamlStorage.discardOnClose();
+            }
             storageBackend.close();
             storageBackend = null;
         }
+        treasuresLoaded = false;
 
+        TreasureBlocks.clearPending();
         instance = null;
         getLogger().info("TLoot 寻宝插件已禁用！");
     }
@@ -213,6 +227,14 @@ public class TLoot extends JavaPlugin {
         }
         economy = rsp.getProvider();
         return economy != null;
+    }
+
+    public void reloadSettings() {
+        configManager.reloadConfig();
+        messageManager.loadMessages();
+        startAutoTreasureTask();
+        beaconEffectManager.stop();
+        beaconEffectManager.start();
     }
 
     public static TLoot getInstance() {
