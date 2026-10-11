@@ -255,19 +255,18 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
         boolean isSystem = SYSTEM_OWNER_UUID.equals(treasure.getOwnerUuid());
 
-        TextComponent message = new TextComponent(
-                plugin.getMessageManager().get("prefix")
-                        + (isSystem
-                        ? ChatColor.GOLD + "【系统寻宝】"
-                        + ChatColor.GREEN + "一个新的宝藏出现了！ "
-                        : ChatColor.GREEN + " " + treasure.getOwnerName() + " 发起了一个寻宝！ ")
-                        + ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins() + " "
-                        + ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + treasure.getTicketPrice() + " "
-                        + ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName
-        );
+        String body = plugin.getMessageManager().get(
+                isSystem ? "broadcast.system-created" : "broadcast.player-created",
+                "owner", treasure.getOwnerName() == null ? "" : treasure.getOwnerName(),
+                "coins", String.valueOf(treasure.getGuaranteedCoins()),
+                "price", String.valueOf(treasure.getTicketPrice()),
+                "world", worldDisplayName);
+
+        TextComponent message = new TextComponent(plugin.getMessageManager().get("prefix") + body);
         message.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/treasure join " + treasure.getId()));
         message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                new ComponentBuilder(ChatColor.GREEN + "点击参与此寻宝").create()));
+                new ComponentBuilder(plugin.getMessageManager().get(
+                        isSystem ? "broadcast.hover-join-system" : "broadcast.hover-join")).create()));
 
         Player carrier = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
         if (!LiuChatBridge.broadcast(carrier, message)) {
@@ -298,7 +297,7 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
 
         if (LiuChatBridge.available()) return;
         String announcement = plugin.getMessageManager().get("prefix")
-                + "§e" + claimerName + " §a找到了 §e" + ownerName + " §a发起的宝藏！";
+                + plugin.getMessageManager().get("broadcast.claimed", "claimer", claimerName, "owner", ownerName);
         if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null),
                 new TextComponent(announcement))) {
             plugin.getServer().broadcastMessage(announcement);

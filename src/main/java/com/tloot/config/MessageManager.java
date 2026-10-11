@@ -41,7 +41,12 @@ public class MessageManager {
         messages.clear();
         for (String key : messagesConfig.getKeys(true)) {
             if (messagesConfig.isString(key)) {
-                messages.put(key, ChatColor.translateAlternateColorCodes('&', messagesConfig.getString(key)));
+                String raw = messagesConfig.getString(key);
+                if (raw == null) {
+                    continue;
+                }
+                // 支持在配置里用 \n 断行：先翻译颜色码，再把字面量 \n 转成真正的换行符
+                messages.put(key, ChatColor.translateAlternateColorCodes('&', raw).replace("\\n", "\n"));
             }
         }
     }

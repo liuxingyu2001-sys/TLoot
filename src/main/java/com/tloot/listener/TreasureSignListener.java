@@ -146,15 +146,15 @@ public class TreasureSignListener implements Listener {
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
 
         TextComponent message = new TextComponent(
-                    plugin.getMessageManager().get("prefix")
-                            + ChatColor.GREEN + " " + treasure.getOwnerName() + " 发起了一个寻宝！ "
-                            + ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins() + " "
-                            + ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + treasure.getTicketPrice() + " "
-                            + ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName
-            );
-            message.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/treasure join " + treasure.getId()));
-            message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                    new ComponentBuilder(ChatColor.GREEN + "点击参与此寻宝").create()));
+                plugin.getMessageManager().get("prefix")
+                        + plugin.getMessageManager().get("broadcast.player-created",
+                        "owner", treasure.getOwnerName() == null ? "" : treasure.getOwnerName(),
+                        "coins", String.valueOf(treasure.getGuaranteedCoins()),
+                        "price", String.valueOf(treasure.getTicketPrice()),
+                        "world", worldDisplayName));
+        message.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/treasure join " + treasure.getId()));
+        message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                new ComponentBuilder(plugin.getMessageManager().get("broadcast.hover-join")).create()));
 
         if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null), message)) {
             for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {

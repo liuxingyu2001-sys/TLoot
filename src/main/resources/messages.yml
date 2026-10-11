@@ -30,6 +30,14 @@ expire:
   treasure-expired: "&c寻宝已过期，宝藏已消失。"
   pointer-expired: "&c你的寻宝指针已失效。"
 
+# 全服广播。支持换行：在需要断行处写 \n，例如 "&6第一行\n&a第二行"
+broadcast:
+  system-created: "&6【系统寻宝】&a一个新的宝藏出现了！ &7保底金币: &6{coins} &7参与费用: &6{price} &7世界: &a{world}"
+  player-created: "&a {owner} 发起了一个寻宝！ &7保底金币: &6{coins} &7参与费用: &6{price} &7世界: &a{world}"
+  claimed: "&e{claimer} &a找到了 &e{owner} &a发起的宝藏！"
+  hover-join-system: "&a点击参与此系统寻宝"
+  hover-join: "&a点击参与此寻宝"
+
 pointer:
   name: "&b寻宝指针"
   lore:
