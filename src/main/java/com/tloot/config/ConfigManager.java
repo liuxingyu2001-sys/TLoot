@@ -1,10 +1,12 @@
 package com.tloot.config;
 
 import com.tloot.TLoot;
+import com.tloot.item.LiuLibItems;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -175,13 +177,19 @@ public class ConfigManager {
                 plugin.getLogger().warning("战利品表条目缺少 material 或 command");
                 continue;
             }
+            int amountMin = toInt(raw.get("amount-min"));
+            int amountMax = toInt(raw.get("amount-max"));
+            // LiuLib 完整物品规格优先（base64:/nbt:/lib:/ce:/小写材质名…），解析失败再按原版材质兜底
+            ItemStack template = LiuLibItems.buildOrNull(materialName);
+            if (template != null) {
+                lootTable.add(new LootEntry(template, amountMin, amountMax, weight));
+                continue;
+            }
             Material material = Material.getMaterial(materialName);
             if (material == null) {
                 plugin.getLogger().warning("战利品表包含无效材料: " + materialName);
                 continue;
             }
-            int amountMin = toInt(raw.get("amount-min"));
-            int amountMax = toInt(raw.get("amount-max"));
             lootTable.add(new LootEntry(material, amountMin, amountMax, weight));
         }
     }

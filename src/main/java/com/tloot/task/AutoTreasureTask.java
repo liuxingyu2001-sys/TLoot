@@ -303,7 +303,8 @@ public class AutoTreasureTask extends BukkitRunnable {
                         int amountMin = Math.max(1, entry.getAmountMin());
                         int amountMax = Math.max(amountMin, entry.getAmountMax());
                         int amount = amountMin + random.nextInt(amountMax - amountMin + 1);
-                        loot.add(new ItemStack(entry.getMaterial(), amount));
+                        // LiuLib 规格条目按模板 clone（超单堆叠上限自动拆堆），原版材质条目行为不变
+                        loot.addAll(entry.createItems(amount));
                     }
                     break;
                 }

@@ -6,7 +6,7 @@
 
     <groupId>com.tloot</groupId>
     <artifactId>TLoot</artifactId>
-    <version>1.0.3</version>
+    <version>1.0.4</version>
     <packaging>jar</packaging>
 
     <name>TLoot</name>
@@ -15,6 +15,7 @@
     <properties>
         <java.version>21</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <liulib.version>1.0.5</liulib.version>
     </properties>
 
     <repositories>
@@ -33,6 +34,14 @@
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
             <version>26.2.build.121-stable</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- LiuLib：物品规格解析（ItemService#buildOrNull，完整物品/物品库引用）。
+             provided，运行时由服务器 plugins/LiuLib 提供（plugin.yml depend: [LiuLib]）。 -->
+        <dependency>
+            <groupId>com.liuxingyu</groupId>
+            <artifactId>LiuLib</artifactId>
+            <version>${liulib.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>

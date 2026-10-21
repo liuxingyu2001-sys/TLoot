@@ -36,6 +36,8 @@ Minecraft 寻宝插件 — 玩家发起寻宝活动，其他玩家参与争夺�
 ## 依赖
 
 - **必需**: [Vault](https://www.spigotmc.org/resources/vault.34315/) + 任意经济插件（如 EssentialsX）
+- **必需**: **LiuLib 1.0.5+**（物品规格解析，`plugin.yml depend: [LiuLib]`；缺失时服务端拒绝加载本插件）
+- **可选**: **liuitemlib**（软依赖，`lib:<物品库ID>` 物品库引用；已加入 `plugin.yml softdepend`）
 - **多端部署**: MySQL 5.7+ / 8.x + Redis 6+
 
 ## 兼容性
@@ -161,6 +163,36 @@ loot-table:
   - command: "give {player} minecraft:netherite_sword 1"
     weight: 3
 ```
+
+#### 物品规格（LiuLib）
+
+`material` 由 **LiuLib 物品规格解析**（`LiuLib.items().buildOrNull`）构建，解析失败才回退原来的
+`Material.getMaterial` 逻辑（老配置的 `DIAMOND` 等原版枚举名行为不变）。支持的写法：
+
+| 写法 | 例子 | 说明 |
+| --- | --- | --- |
+| 原版材质 | `material: DIAMOND` / `minecraft:diamond` / `diamond` | 大小写、命名空间写法都兼容 |
+| 原版材质 + 数量后缀 | `material: DIAMOND*3` / `DIAMOND:3` | 数量仍以 `amount-min`/`amount-max` 为准（随机数量会覆盖） |
+| 完整物品 | `material: "base64:..."` / `"nbt:..."` / `"bytes:..."` / `"item:base64:..."` | Paper 二进制序列化全保真（数据组件 / PDC / 附魔 / CE 物品），用 `/liulib item main` 复制 |
+| CE 物品 | `material: "ce:命名空间:id"` / `"craftengine:命名空间:id"` | 需安装 CraftEngine |
+| 物品库引用 | `material: "lib:gift:spring_2026"` | 需安装 **liuitemlib** 并配置对应物品库 |
+
+```yaml
+loot-table:
+  # 完整物品：数量由 amount-min / amount-max 随机，超过单堆叠上限自动拆成多堆
+  - material: "base64:H4sI..."
+    amount-min: 1
+    amount-max: 1
+    weight: 5
+  # 物品库引用
+  - material: "lib:gift:spring_2026"
+    amount-min: 1
+    amount-max: 1
+    weight: 10
+```
+
+> 完整物品规格在配置解析期构建一次并缓存模板，发放时只做 clone；损坏的 Base64/未知物品库 ID
+> 会回退到原版材质解析，仍失败则按原来的「无效材料」警告跳过该条目。
 
 ## 项目结构
 
