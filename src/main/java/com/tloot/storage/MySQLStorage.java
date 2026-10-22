@@ -158,6 +158,9 @@ public class MySQLStorage implements StorageBackend {
         try (Statement stmt = conn.createStatement()) {
             stmt.executeUpdate("ALTER TABLE " + table + " ADD COLUMN doom TINYINT(1) NOT NULL DEFAULT 0");
             plugin.getLogger().info("已为旧数据表补充 doom 列（厄运宝藏）");
+        } catch (SQLException e) {
+            throw new IllegalStateException("旧数据表升级失败，请手动执行: ALTER TABLE " + table
+                    + " ADD COLUMN doom TINYINT(1) NOT NULL DEFAULT 0", e);
         }
     }
 

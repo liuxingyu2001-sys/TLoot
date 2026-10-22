@@ -46,8 +46,12 @@ public class DoomTreasureManager implements Listener {
 
     public void init() {
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        if (!MythicMobsBridge.available()) {
-            warnNoMythic();
+        if (plugin.getConfigManager().isDoomTreasureEnabled()) {
+            if (!MythicMobsBridge.available()) {
+                warnNoMythic();
+            } else if (plugin.getConfigManager().getDoomMobs().isEmpty()) {
+                warnNoMobs();
+            }
         }
         task = plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick, 40L, 20L);
     }

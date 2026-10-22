@@ -12,6 +12,7 @@
 - MythicMobs 通过反射调用（`softdepend`），未安装或怪物名无效时自动降级为普通宝藏，不影响原有玩法。
 - 指南针菜单、我的寻宝列表显示「厄运宝藏」、剩余守卫数量与解锁状态；新增 `broadcast.doom-created` / `broadcast.doom-cleared` 公告文案。
 - 跨服同步（Redis）与 MySQL 存储新增 `doom` 字段；MySQL 旧表会自动补列。
+- 修复旧服务器的 `messages.yml` 缺少新版本键（如 `broadcast.*`）时玩家看到「消息未找到」的问题：加载时用内置默认值兜底，已有自定义值不受影响。
 
 ### 修复 — 寻宝指针不指向宝藏
 
