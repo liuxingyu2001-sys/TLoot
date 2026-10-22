@@ -45,14 +45,14 @@ public class MySQLStorage implements StorageBackend {
 
     private static final String UPSERT_SQL =
             "INSERT INTO %s (id, owner_uuid, owner_name, world, x, y, z, guaranteed_coins, ticket_price,"
-                    + " create_time, expire_time, items, commands, participants) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    + " create_time, expire_time, items, commands, participants, doom) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                     + "ON DUPLICATE KEY UPDATE "
                     + "owner_uuid=VALUES(owner_uuid), owner_name=VALUES(owner_name), world=VALUES(world), "
                     + "x=VALUES(x), y=VALUES(y), z=VALUES(z), guaranteed_coins=VALUES(guaranteed_coins), "
                     + "ticket_price=VALUES(ticket_price), create_time=VALUES(create_time), "
                     + "expire_time=VALUES(expire_time), items=VALUES(items), commands=VALUES(commands), "
-                    + "participants=VALUES(participants)";
+                    + "participants=VALUES(participants), doom=VALUES(doom)";
 
     private HikariDataSource dataSource;
     /** Bounded queue rejects writes on overload instead of silently losing a creation or deletion. */
@@ -126,14 +126,38 @@ public class MySQLStorage implements StorageBackend {
                 "expire_time BIGINT NOT NULL," +
                 "items LONGTEXT," +
                 "commands TEXT," +
-                "participants TEXT" +
+                "participants TEXT," +
+                "doom TINYINT(1) NOT NULL DEFAULT 0" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
 
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
             stmt.executeUpdate(sql);
+            ensureDoomColumn(conn);
         } catch (SQLException e) {
             throw new IllegalStateException("无法创建宝藏数据表", e);
+        }
+    }
+
+    /**
+     * 旧版本的数据表没有 doom 列；MySQL 不支持 ADD COLUMN IF NOT EXISTS，
+     * 通过 INFORMATION_SCHEMA 判断后再补列，升级后无需手动改表。
+     */
+    private void ensureDoomColumn(Connection conn) throws SQLException {
+        String table = tablePrefix + "treasures";
+        String check = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS "
+                + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'doom'";
+        try (PreparedStatement ps = conn.prepareStatement(check)) {
+            ps.setString(1, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next() && rs.getInt(1) > 0) {
+                    return;
+                }
+            }
+        }
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("ALTER TABLE " + table + " ADD COLUMN doom TINYINT(1) NOT NULL DEFAULT 0");
+            plugin.getLogger().info("已为旧数据表补充 doom 列（厄运宝藏）");
         }
     }
 
@@ -311,6 +335,7 @@ public class MySQLStorage implements StorageBackend {
         ps.setString(12, itemsBase64);
         ps.setString(13, commands);
         ps.setString(14, participants);
+        ps.setBoolean(15, treasure.isDoom());
     }
 
     @Override
@@ -350,6 +375,7 @@ public class MySQLStorage implements StorageBackend {
         String itemsBase64 = rs.getString("items");
         String commandsStr = rs.getString("commands");
         String participantsStr = rs.getString("participants");
+        boolean doom = rs.getBoolean("doom");
 
         World world = Bukkit.getWorld(worldName);
         Location location = new Location(world, x, y, z);
@@ -366,7 +392,7 @@ public class MySQLStorage implements StorageBackend {
         }
 
         Treasure treasure = new Treasure(id, ownerUuid, ownerName, worldName, location,
-                guaranteedCoins, ticketPrice, items, commands, expireTime, createTime);
+                guaranteedCoins, ticketPrice, items, commands, expireTime, createTime, doom);
 
         if (participantsStr != null && !participantsStr.isEmpty()) {
             for (String uuidStr : participantsStr.split(",")) {

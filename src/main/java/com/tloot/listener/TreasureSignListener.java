@@ -126,7 +126,6 @@ public class TreasureSignListener implements Listener {
         consumeSign(player, itemInHand);
 
         player.sendMessage(plugin.getMessageManager().get("create.success"));
-        player.sendMessage(ChatColor.GREEN + "宝藏ID: " + ChatColor.GOLD + treasure.getId());
         player.sendMessage(ChatColor.GREEN + "保底金币: " + ChatColor.GOLD + guaranteedCoins);
         player.sendMessage(ChatColor.GREEN + "参与费用: " + ChatColor.GOLD + ticketPrice);
 

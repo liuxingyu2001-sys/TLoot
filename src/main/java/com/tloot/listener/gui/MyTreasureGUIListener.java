@@ -4,6 +4,7 @@ import com.tloot.TLoot;
 import com.tloot.data.Treasure;
 import com.tloot.gui.GUIManager;
 import com.tloot.item.PointerItem;
+import com.tloot.util.TreasureLabel;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -166,14 +167,14 @@ public class MyTreasureGUIListener extends AbstractGUIListener {
 
         GUIManager.playSuccessSound(player);
         player.sendMessage(ChatColor.GREEN + "已重新获取寻宝指针！");
-        player.sendMessage(ChatColor.GRAY + "寻宝ID: " + ChatColor.AQUA + treasure.getId());
+        player.sendMessage(ChatColor.GRAY + "寻宝: " + TreasureLabel.colored(treasure));
     }
 
     private void sendOwnerDetails(Player player, Treasure treasure) {
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
         GUIManager.playClickSound(player);
         player.sendMessage(ChatColor.GREEN + "========== 你的寻宝详情 ==========");
-        player.sendMessage(ChatColor.GOLD + "宝藏 #" + treasure.getId());
+        player.sendMessage(ChatColor.GOLD + "你的寻宝");
         player.sendMessage(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
         player.sendMessage(ChatColor.GRAY + "坐标: " + ChatColor.DARK_GREEN
                 + treasure.getLocation().getBlockX() + ", "

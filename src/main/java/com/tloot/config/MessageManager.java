@@ -31,8 +31,9 @@ public class MessageManager {
         }
         messagesConfig = YamlConfiguration.loadConfiguration(messagesFile);
 
+        YamlConfiguration defaultConfig = null;
         try (Reader defaultReader = new InputStreamReader(plugin.getResource("messages.yml"), StandardCharsets.UTF_8)) {
-            YamlConfiguration defaultConfig = YamlConfiguration.loadConfiguration(defaultReader);
+            defaultConfig = YamlConfiguration.loadConfiguration(defaultReader);
             messagesConfig.setDefaults(defaultConfig);
         } catch (IOException e) {
             plugin.getLogger().warning("无法加载默认消息文件: " + e.getMessage());
@@ -49,8 +50,22 @@ public class MessageManager {
                 messages.put(key, ChatColor.translateAlternateColorCodes('&', raw).replace("\\n", "\n"));
             }
         }
-    }
 
+        // 老服务器的 messages.yml 可能缺少新版本才加入的键（如 broadcast.* / doom-*）。
+        // setDefaults 在部分 Bukkit 版本下不会把默认键并入 getKeys()，这里显式兜底，
+        // 避免玩家看到 “消息未找到: xxx”。
+        if (defaultConfig != null) {
+            for (String key : defaultConfig.getKeys(true)) {
+                if (messages.containsKey(key) || !defaultConfig.isString(key)) {
+                    continue;
+                }
+                String raw = defaultConfig.getString(key);
+                if (raw != null) {
+                    messages.put(key, ChatColor.translateAlternateColorCodes('&', raw).replace("\\n", "\n"));
+                }
+            }
+        }
+    }
     public String get(String key) {
         return messages.getOrDefault(key, "&c消息未找到: " + key);
     }

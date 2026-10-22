@@ -10,6 +10,7 @@ depend:
 softdepend:
   - LiuChat
   - liuitemlib
+  - MythicMobs
 
 libraries:
   - com.zaxxer:HikariCP:5.1.0

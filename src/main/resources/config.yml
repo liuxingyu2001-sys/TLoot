@@ -195,3 +195,32 @@ auto-treasure:
     # 指令奖励示例（weight越小越稀有）
     # - command: "give {player} minecraft:diamond_sword{display:{Name:'\\\"寻宝之剑\\\"'},Enchantments:[{id:sharpness,lvl:3}]} 1"
     #   weight: 3
+
+# ==================== 厄运宝藏 ====================
+# 依赖 MythicMobs（已加入 softdepend）。开启后，自动寻宝有概率生成「厄运宝藏」：
+# 会在宝藏附近刷出配置的 MythicMobs 怪物，全部击杀后宝箱才会出现，奖励更丰厚。
+# 未安装 MythicMobs 或 mobs 为空时，该功能自动降级为普通宝藏。
+doom-treasure:
+  # 是否启用（需要同时安装 MythicMobs 并配置 mobs）
+  enabled: false
+
+  # 每次自动寻宝转换为厄运宝藏的概率（0-1）
+  chance: 0.25
+
+  # MythicMobs 内部名 → 生成数量
+  # 注意：必须是 /mm mobs list 里存在的内部名（区分大小写）
+  mobs:
+    "SkeletalKnight": 2
+    "WitherSkeleton": 1
+
+  # 守卫出生点相对宝箱的水平半径（格）
+  spawn-radius: 6
+
+  # 保底金币倍率（在普通系统宝藏基础上）
+  coin-multiplier: 3.0
+
+  # 参与费用倍率
+  ticket-multiplier: 2.0
+
+  # 额外抽取的战利品次数（普通为 3-6 件，这里再加）
+  extra-loot-rolls: 3

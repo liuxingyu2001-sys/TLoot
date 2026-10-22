@@ -4,6 +4,7 @@ import com.tloot.TLoot;
 import com.tloot.data.Treasure;
 import com.tloot.gui.GUIManager;
 import com.tloot.item.PointerItem;
+import com.tloot.util.TreasureLabel;
 import net.milkbowl.vault.economy.Economy;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.ChatColor;
@@ -188,7 +189,7 @@ public class CompassGUIListener extends AbstractGUIListener {
 
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
         player.sendMessage(ChatColor.GREEN + "你成功领取了寻宝指针！");
-        player.sendMessage(ChatColor.GRAY + "寻宝ID: " + ChatColor.AQUA + treasure.getId());
+        player.sendMessage(ChatColor.GRAY + "寻宝: " + TreasureLabel.colored(treasure));
         player.sendMessage(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
         player.sendMessage(ChatColor.GRAY + "手持指南针找到宝藏吧！");
     }

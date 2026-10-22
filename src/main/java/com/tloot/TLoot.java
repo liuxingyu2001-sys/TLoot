@@ -5,6 +5,7 @@ import com.tloot.command.TreasureCommand;
 import com.tloot.config.ConfigManager;
 import com.tloot.config.MessageManager;
 import com.tloot.data.TreasureManager;
+import com.tloot.doom.DoomTreasureManager;
 import com.tloot.gui.GUIManager;
 import com.tloot.listener.PlayerSessionListener;
 import com.tloot.listener.PointerListener;
@@ -36,6 +37,7 @@ public class TLoot extends JavaPlugin {
     private MessageManager messageManager;
     private TreasureManager treasureManager;
     private GUIManager guiManager;
+    private DoomTreasureManager doomTreasureManager;
     private BeaconEffectManager beaconEffectManager;
     private PointerListener pointerListener;
     private TreasureExpireTask expireTask;
@@ -101,6 +103,9 @@ public class TLoot extends JavaPlugin {
         }
 
         guiManager = new GUIManager(this);
+
+        doomTreasureManager = new DoomTreasureManager(this);
+        doomTreasureManager.init();
 
         beaconEffectManager = new BeaconEffectManager(this);
         beaconEffectManager.start();
@@ -177,6 +182,10 @@ public class TLoot extends JavaPlugin {
             pointerListener.shutdown();
             pointerListener = null;
         }
+        if (doomTreasureManager != null) {
+            doomTreasureManager.shutdown();
+            doomTreasureManager = null;
+        }
         if (guiManager != null) {
             guiManager.clearAll();
         }
@@ -235,6 +244,9 @@ public class TLoot extends JavaPlugin {
         startAutoTreasureTask();
         beaconEffectManager.stop();
         beaconEffectManager.start();
+        if (doomTreasureManager != null) {
+            doomTreasureManager.reload();
+        }
     }
 
     public static TLoot getInstance() {
@@ -263,6 +275,10 @@ public class TLoot extends JavaPlugin {
 
     public PointerListener getPointerListener() {
         return pointerListener;
+    }
+
+    public DoomTreasureManager getDoomTreasureManager() {
+        return doomTreasureManager;
     }
 
     public RedisSyncManager getRedisSyncManager() {

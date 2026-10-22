@@ -2,8 +2,10 @@ package com.tloot.gui;
 
 import com.tloot.TLoot;
 import com.tloot.data.Treasure;
+import com.tloot.doom.DoomTreasureManager;
 import com.tloot.item.TreasureSignItem;
 import com.tloot.task.AutoTreasureTask;
+import com.tloot.util.TreasureLabel;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.ComponentBuilder;
 import net.md_5.bungee.api.chat.HoverEvent;
@@ -415,12 +417,9 @@ public class GUIManager {
 
         for (Treasure treasure : treasures) {
             String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
-            String systemTag = treasure.getOwnerUuid().equals(AutoTreasureTask.SYSTEM_OWNER_UUID)
-                    ? ChatColor.GOLD + "【系统】" : "";
 
             TextComponent message = new TextComponent(
-                    ChatColor.GOLD + "宝藏 #" + treasure.getId() + " " +
-                    systemTag +
+                    TreasureLabel.colored(treasure) + " " +
                     ChatColor.GRAY + "发起者: " + ChatColor.YELLOW + treasure.getOwnerName() + " " +
                     ChatColor.GRAY + "保底: " + ChatColor.GOLD + formatNumber(treasure.getGuaranteedCoins()) + " " +
                     ChatColor.GRAY + "费用: " + ChatColor.GOLD + formatNumber(treasure.getTicketPrice()) + " " +
@@ -460,12 +459,18 @@ public class GUIManager {
             String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
 
             boolean isSystem = treasure.getOwnerUuid().equals(AutoTreasureTask.SYSTEM_OWNER_UUID);
-            Material icon = isSystem ? Material.ENDER_EYE : Material.COMPASS;
-            String ownerLabel = isSystem
+            boolean isDoom = treasure.isDoom();
+            Material icon = isDoom ? Material.WITHER_SKELETON_SKULL
+                    : isSystem ? Material.ENDER_EYE : Material.COMPASS;
+            String ownerLabel = isDoom
+                    ? ChatColor.DARK_RED + "【厄运守护】"
+                    : isSystem
                     ? ChatColor.GOLD + "【系统宝藏】"
                     : ChatColor.YELLOW + treasure.getOwnerName();
 
-            String typeTag = isSystem
+            String typeTag = isDoom
+                    ? ChatColor.LIGHT_PURPLE + "类型: " + ChatColor.DARK_RED + "厄运宝藏"
+                    : isSystem
                     ? ChatColor.LIGHT_PURPLE + "类型: " + ChatColor.GOLD + "系统宝藏"
                     : ChatColor.LIGHT_PURPLE + "类型: " + ChatColor.AQUA + "玩家宝藏";
 
@@ -479,18 +484,29 @@ public class GUIManager {
                 participantColor = ChatColor.GRAY.toString();
             }
 
+            List<String> lore = new ArrayList<>();
+            lore.add("");
+            lore.add(ChatColor.GRAY + "发起者: " + ownerLabel);
+            lore.add(typeTag);
+            if (isDoom) {
+                int remaining = doomRemaining(treasure);
+                lore.add(remaining > 0
+                        ? ChatColor.DARK_RED + "守卫: " + ChatColor.RED + remaining + " 只存活"
+                        + ChatColor.GRAY + "（全部击杀后宝箱才会出现）"
+                        : ChatColor.GREEN + "守卫已清除，宝箱已现世");
+            }
+            lore.add(ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + formatNumber(treasure.getGuaranteedCoins()));
+            lore.add(ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + formatNumber(treasure.getTicketPrice()));
+            lore.add(ChatColor.GRAY + "参与人数: " + participantColor + participantCount + " 人");
+            lore.add(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
+            lore.add(ChatColor.GRAY + "剩余时间: " + ChatColor.RED + treasure.getRemainingTimeFormatted());
+            lore.add("");
+            lore.add(ChatColor.YELLOW + "点击领取寻宝指针！");
+
             ItemStack treasureItem = createGuiItem(icon,
-                    ChatColor.GREEN + "宝藏 #" + treasure.getId(),
-                    "",
-                    ChatColor.GRAY + "发起者: " + ownerLabel,
-                    typeTag,
-                    ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + formatNumber(treasure.getGuaranteedCoins()),
-                    ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + formatNumber(treasure.getTicketPrice()),
-                    ChatColor.GRAY + "参与人数: " + participantColor + participantCount + " 人",
-                    ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName,
-                    ChatColor.GRAY + "剩余时间: " + ChatColor.RED + treasure.getRemainingTimeFormatted(),
-                    "",
-                    ChatColor.YELLOW + "点击领取寻宝指针！");
+                    (isDoom ? ChatColor.DARK_RED : isSystem ? ChatColor.GOLD : ChatColor.GREEN)
+                            + "✦ " + TreasureLabel.plain(treasure),
+                    lore.toArray(new String[0]));
 
             inv.setItem(i - startIndex, tagTreasure(treasureItem, treasure));
         }
@@ -578,14 +594,25 @@ public class GUIManager {
             String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
 
             ItemStack treasureItem;
+            boolean isDoom = treasure.isDoom();
             if (isOwner) {
                 int pCount = treasure.getParticipantCount();
                 String countColor = pCount > 0 ? ChatColor.GREEN.toString() : ChatColor.GRAY.toString();
+                Material icon = isDoom ? Material.WITHER_SKELETON_SKULL : Material.CHEST;
+                String title = isDoom ? ChatColor.DARK_RED + "✦ 厄运宝藏" : ChatColor.GOLD + "✦ 你的寻宝";
+                String doomStatus = "";
+                if (isDoom) {
+                    int remaining = doomRemaining(treasure);
+                    doomStatus = remaining > 0
+                            ? ChatColor.DARK_RED + "守卫: " + ChatColor.RED + remaining + " 只存活"
+                            : ChatColor.GREEN + "守卫已清除，宝箱已现世";
+                }
 
-                treasureItem = createGuiItem(Material.CHEST,
-                        ChatColor.GOLD + "✦ 宝藏 #" + treasure.getId(),
+                treasureItem = createGuiItem(icon,
+                        title,
                         ChatColor.GRAY + "状态: " + ChatColor.GREEN + "发起中",
                         "",
+                        doomStatus,
                         ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName,
                         ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + formatNumber(treasure.getGuaranteedCoins()),
                         ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + formatNumber(treasure.getTicketPrice()),
@@ -596,8 +623,9 @@ public class GUIManager {
                                 (int)treasure.getLocation().getY() + ", " +
                                 (int)treasure.getLocation().getZ());
             } else {
-                treasureItem = createGlowingGuiItem(Material.COMPASS,
-                        ChatColor.AQUA + "✦ 宝藏 #" + treasure.getId(),
+                treasureItem = createGlowingGuiItem(
+                        isDoom ? Material.WITHER_SKELETON_SKULL : Material.COMPASS,
+                        (isDoom ? ChatColor.DARK_RED : ChatColor.AQUA) + "✦ " + TreasureLabel.plain(treasure),
                         ChatColor.GRAY + "状态: " + ChatColor.YELLOW + "已参与",
                         "",
                         ChatColor.GRAY + "发起者: " + ChatColor.YELLOW + treasure.getOwnerName(),
@@ -684,7 +712,7 @@ public class GUIManager {
             player.sendMessage(ChatColor.AQUA + "--- 我发起的寻宝 ---");
             for (Treasure treasure : ownedTreasures) {
                 String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
-                player.sendMessage(ChatColor.GOLD + "宝藏 #" + treasure.getId() + " " +
+                player.sendMessage(TreasureLabel.colored(treasure) + " " +
                         ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName + " " +
                         ChatColor.GRAY + "参与人数: " + ChatColor.WHITE + treasure.getParticipantCount() + " " +
                         ChatColor.GRAY + "剩余时间: " + ChatColor.RED + treasure.getRemainingTimeFormatted());
@@ -695,7 +723,7 @@ public class GUIManager {
             player.sendMessage(ChatColor.AQUA + "--- 我参与的寻宝 ---");
             for (Treasure treasure : participatingTreasures) {
                 String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
-                player.sendMessage(ChatColor.GOLD + "宝藏 #" + treasure.getId() + " " +
+                player.sendMessage(TreasureLabel.colored(treasure) + " " +
                         ChatColor.GRAY + "发起者: " + ChatColor.YELLOW + treasure.getOwnerName() + " " +
                         ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName + " " +
                         ChatColor.GRAY + "剩余时间: " + ChatColor.RED + treasure.getRemainingTimeFormatted());
@@ -707,6 +735,12 @@ public class GUIManager {
         }
 
         player.sendMessage(ChatColor.GREEN + "=================================");
+    }
+
+    /** 厄运宝藏当前剩余的守卫数量（未启用/已解锁返回 0） */
+    private int doomRemaining(Treasure treasure) {
+        DoomTreasureManager doom = plugin.getDoomTreasureManager();
+        return doom != null ? doom.remainingGuards(treasure.getId()) : 0;
     }
 
     // ==================== 进度条工具 ====================

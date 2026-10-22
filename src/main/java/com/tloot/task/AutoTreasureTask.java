@@ -3,6 +3,7 @@ package com.tloot.task;
 import com.tloot.TLoot;
 import com.tloot.config.LootEntry;
 import com.tloot.integration.LiuChatBridge;
+import com.tloot.integration.MythicMobsBridge;
 import com.tloot.data.Treasure;
 import com.tloot.data.TreasureManager;
 import net.md_5.bungee.api.chat.ClickEvent;
@@ -91,9 +92,11 @@ public class AutoTreasureTask extends BukkitRunnable {
             return;
         }
 
+        boolean doom = shouldCreateDoom();
+
         List<ItemStack> loot = new ArrayList<>();
         List<String> commands = new ArrayList<>();
-        generateRewards(loot, commands);
+        generateRewards(loot, commands, doom ? plugin.getConfigManager().getDoomExtraLootRolls() : 0);
 
         if (loot.isEmpty() && commands.isEmpty()) {
             plugin.getLogger().warning("[自动寻宝] 战利品表为空，无法生成系统宝藏");
@@ -112,6 +115,14 @@ public class AutoTreasureTask extends BukkitRunnable {
         int guaranteedCoins = minCoins + random.nextInt(maxCoins - minCoins + 1);
         int ticketPrice = plugin.getConfigManager().getAutoTreasureTicketPrice();
         long expireTime = plugin.getConfigManager().getAutoTreasureExpireTime();
+
+        // 厄运宝藏：更丰厚的保底金币与门票（奖励条目已在上方额外多抽）
+        if (doom) {
+            guaranteedCoins = capCoins(Math.round(guaranteedCoins
+                    * plugin.getConfigManager().getDoomCoinMultiplier()));
+            ticketPrice = capCoins(Math.round(ticketPrice
+                    * plugin.getConfigManager().getDoomTicketMultiplier()));
+        }
 
         // 强制加载区块，确保方块操作安全
         world.getChunkAt(chestLoc).load(true);
@@ -134,32 +145,50 @@ public class AutoTreasureTask extends BukkitRunnable {
                     ticketPrice,
                     loot,
                     commands,
-                    expireTime
+                    expireTime,
+                    doom
             );
         } catch (Exception e) {
             plugin.getLogger().severe("[自动寻宝] 创建系统宝藏失败: " + e.getMessage());
             return;
         }
 
+        // 厄运宝藏先刷守卫；守卫刷出后宝箱要等全部击杀才出现
+        boolean guardsSpawned = false;
+        if (doom) {
+            guardsSpawned = plugin.getDoomTreasureManager() != null
+                    && plugin.getDoomTreasureManager().start(treasure);
+            if (!guardsSpawned) {
+                plugin.getLogger().warning("[自动寻宝] 厄运宝藏守卫生成失败，已按普通宝藏处理");
+            }
+        }
+
         // 奖励物品只保存在 Treasure 记录中，不物理放入箱子：
         // 否则领取/过期移除箱子时物品会洒落在地上造成重复发放，且可被漏斗抽走
-        Block block = chestLoc.getBlock();
-        try {
-            block.setType(Material.CHEST, false);
-        } catch (RuntimeException e) {
-            treasureManager.removeTreasure(treasure.getId());
-            plugin.getLogger().severe("[自动寻宝] 放置箱子失败: " + e.getMessage());
-            return;
+        if (!guardsSpawned) {
+            Block block = chestLoc.getBlock();
+            try {
+                block.setType(Material.CHEST, false);
+            } catch (RuntimeException e) {
+                treasureManager.removeTreasure(treasure.getId());
+                plugin.getLogger().severe("[自动寻宝] 放置箱子失败: " + e.getMessage());
+                return;
+            }
         }
 
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(worldName);
-        plugin.getLogger().info("[自动寻宝] 已生成宝藏 #" + treasure.getId()
+        plugin.getLogger().info("[自动寻宝] 已生成" + (doom ? "厄运" : "") + "宝藏 #" + treasure.getId()
                 + " 世界=" + worldDisplayName
                 + " 保底=" + guaranteedCoins
                 + " 费用=" + ticketPrice
-                + " 过期=" + (expireTime / 60000) + "分钟");
+                + " 过期=" + (expireTime / 60000) + "分钟"
+                + (doom ? " 厄运守卫战" : ""));
 
-        broadcastTreasure(treasure);
+        if (doom && guardsSpawned) {
+            broadcastDoomTreasure(treasure);
+        } else {
+            broadcastTreasure(treasure);
+        }
     }
 
     private Location findSafeLocation(World world, int[] range) {
@@ -271,7 +300,7 @@ public class AutoTreasureTask extends BukkitRunnable {
         return null;
     }
 
-    private void generateRewards(List<ItemStack> loot, List<String> commands) {
+    private void generateRewards(List<ItemStack> loot, List<String> commands, int extraRolls) {
         // 过滤权重 <= 0 的条目，避免 totalWeight 为 0 时 random.nextInt(0) 抛异常导致定时任务被取消
         List<LootEntry> lootTable = new ArrayList<>();
         for (LootEntry entry : plugin.getConfigManager().getLootTable()) {
@@ -288,7 +317,7 @@ public class AutoTreasureTask extends BukkitRunnable {
             totalWeight += entry.getWeight();
         }
 
-        int itemCount = 3 + random.nextInt(4);
+        int itemCount = 3 + random.nextInt(4) + Math.max(0, extraRolls);
 
         for (int i = 0; i < itemCount; i++) {
             int roll = random.nextInt(totalWeight);
@@ -308,6 +337,44 @@ public class AutoTreasureTask extends BukkitRunnable {
                     }
                     break;
                 }
+            }
+        }
+    }
+
+    /**
+     * 是否把本次自动寻宝生成为厄运宝藏：
+     * 需要开启配置、安装 MythicMobs、配置了守卫怪物，并命中概率。
+     */
+    private boolean shouldCreateDoom() {
+        if (!plugin.getConfigManager().isDoomTreasureEnabled()) {
+            return false;
+        }
+        if (!MythicMobsBridge.available() || plugin.getConfigManager().getDoomMobs().isEmpty()) {
+            return false;
+        }
+        double chance = plugin.getConfigManager().getDoomChance();
+        return chance > 0 && random.nextDouble() < chance;
+    }
+
+    private static int capCoins(long value) {
+        return (int) Math.max(0L, Math.min(Integer.MAX_VALUE, value));
+    }
+
+    private void broadcastDoomTreasure(Treasure treasure) {
+        String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
+
+        TextComponent message = new TextComponent(
+                plugin.getMessageManager().get("prefix")
+                        + plugin.getMessageManager().get("broadcast.doom-created",
+                        "coins", String.valueOf(treasure.getGuaranteedCoins()),
+                        "price", String.valueOf(treasure.getTicketPrice()),
+                        "world", worldDisplayName));
+        message.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/treasure join " + treasure.getId()));
+        message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                new ComponentBuilder(plugin.getMessageManager().get("broadcast.hover-join-doom")).create()));
+        if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null), message)) {
+            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+                onlinePlayer.spigot().sendMessage(message);
             }
         }
     }

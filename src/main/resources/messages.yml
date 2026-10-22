@@ -37,6 +37,10 @@ broadcast:
   claimed: "&e{claimer} &a找到了 &e{owner} &a发起的宝藏！"
   hover-join-system: "&a点击参与此系统寻宝"
   hover-join: "&a点击参与此寻宝"
+  # 厄运宝藏：守卫全部被击杀后宝箱才会出现，奖励更丰厚
+  doom-created: "&4☠ 厄运宝藏 &c出现了！&7击败守卫才能开启宝箱，奖励更加丰厚！ &7世界: &a{world} &7保底: &6{coins}"
+  doom-cleared: "&4☠ 厄运宝藏 &a的守卫已被击败，宝箱现世！ &7世界: &a{world}"
+  hover-join-doom: "&4点击参与此厄运宝藏"
 
 pointer:
   name: "&b寻宝指针"
@@ -46,6 +50,10 @@ pointer:
     - "&7剩余时间: &c{time}"
     - ""
     - "&7指向宝藏方向..."
+  # 指针与宝藏不在同一世界时，显示在 ActionBar 的提示（指南针无法跨世界指向）
+  wrong-world: "&e宝藏位于 &b{world}&e，请先前往该世界"
+  # 宝藏所在世界当前未加载时的提示
+  world-unavailable: "&c宝藏所在世界当前不可用"
 
 treasure:
   list-empty: "&c当前没有可参与的寻宝。"

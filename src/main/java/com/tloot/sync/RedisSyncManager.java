@@ -163,7 +163,8 @@ public class RedisSyncManager {
         }
 
         Treasure treasure = new Treasure(id, ownerUuid, ownerName, worldName, location,
-                guaranteedCoins, ticketPrice, items, commands, expireTime, createTime);
+                guaranteedCoins, ticketPrice, items, commands, expireTime, createTime,
+                data.has("doom") && data.get("doom").getAsBoolean());
 
         if (data.has("participants")) {
             for (var p : data.getAsJsonArray("participants")) {
@@ -220,6 +221,7 @@ public class RedisSyncManager {
         data.addProperty("ticketPrice", treasure.getTicketPrice());
         data.addProperty("createTime", treasure.getCreateTime());
         data.addProperty("expireTime", treasure.getExpireTime());
+        data.addProperty("doom", treasure.isDoom());
         data.addProperty("items", MySQLStorage.itemStacksToBase64(treasure.getItems()));
 
         JsonArray commandsArray = new JsonArray();

@@ -26,6 +26,8 @@ public class Treasure {
     private final long createTime;
     private final long expireTime;
     private final List<UUID> participants;
+    /** 厄运宝藏：宝箱在守卫被全部击杀后才出现 */
+    private final boolean doom;
     /** 位置索引键，构造后不变，预先算好避免每次查询都拼接字符串 */
     private final String locationKey;
 
@@ -42,9 +44,24 @@ public class Treasure {
                 location, guaranteedCoins, ticketPrice, items, commands, expireTime, createTime);
     }
 
+    public Treasure(String id, UUID ownerUuid, String ownerName, Location location,
+                    int guaranteedCoins, int ticketPrice, List<ItemStack> items, List<String> commands,
+                    long expireTime, long createTime, boolean doom) {
+        this(id, ownerUuid, ownerName,
+                location.getWorld() != null ? location.getWorld().getName() : "unknown",
+                location, guaranteedCoins, ticketPrice, items, commands, expireTime, createTime, doom);
+    }
+
     public Treasure(String id, UUID ownerUuid, String ownerName, String worldName, Location location,
                     int guaranteedCoins, int ticketPrice, List<ItemStack> items, List<String> commands,
                     long expireTime, long createTime) {
+        this(id, ownerUuid, ownerName, worldName, location, guaranteedCoins, ticketPrice, items, commands,
+                expireTime, createTime, false);
+    }
+
+    public Treasure(String id, UUID ownerUuid, String ownerName, String worldName, Location location,
+                    int guaranteedCoins, int ticketPrice, List<ItemStack> items, List<String> commands,
+                    long expireTime, long createTime, boolean doom) {
         this.id = id;
         this.ownerUuid = ownerUuid;
         this.ownerName = ownerName;
@@ -56,6 +73,7 @@ public class Treasure {
         this.commands = commands != null ? new ArrayList<>(commands) : new ArrayList<>();
         this.createTime = createTime;
         this.expireTime = expireTime;
+        this.doom = doom;
         this.participants = new CopyOnWriteArrayList<>();
         this.locationKey = computeLocationKey();
     }
@@ -73,6 +91,17 @@ public class Treasure {
     }
 
     public Location getLocation() {
+        if (location == null) {
+            return null;
+        }
+        // 多世界插件可能在 TLoot 加载存档之后才加载世界，此时反序列化得到的世界是 null。
+        // 这里按世界名惰性补全，否则宝藏所在世界加载完成后，指针仍会一直提示"世界不可用"。
+        if (location.getWorld() == null && worldName != null) {
+            World world = Bukkit.getWorld(worldName);
+            if (world != null) {
+                location.setWorld(world);
+            }
+        }
         return location;
     }
 
@@ -81,11 +110,16 @@ public class Treasure {
     }
 
     public boolean isWorldLoaded() {
-        return location.getWorld() != null;
+        return getLocation().getWorld() != null;
     }
 
     public int getGuaranteedCoins() {
         return guaranteedCoins;
+    }
+
+    /** 厄运宝藏：守卫未清空时宝箱不会出现，奖励也更丰厚 */
+    public boolean isDoom() {
+        return doom;
     }
 
     public int getTicketPrice() {
@@ -203,6 +237,7 @@ public class Treasure {
         data.put("ticketPrice", ticketPrice);
         data.put("createTime", createTime);
         data.put("expireTime", expireTime);
+        data.put("doom", doom);
 
         List<Map<String, Object>> itemsData = new ArrayList<>(items.size());
         for (ItemStack item : items) {
@@ -293,7 +328,8 @@ public class Treasure {
         }
 
         Treasure treasure = new Treasure(id, ownerUuid, ownerName, worldName, location,
-                guaranteedCoins, ticketPrice, items, commands, expireTime, createTime);
+                guaranteedCoins, ticketPrice, items, commands, expireTime, createTime,
+                Boolean.TRUE.equals(data.get("doom")));
 
         if (data.get("participants") instanceof List<?> participantsData) {
             for (Object uuidObj : participantsData) {

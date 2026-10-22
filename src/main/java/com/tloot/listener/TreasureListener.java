@@ -7,6 +7,7 @@ import com.tloot.item.PointerItem;
 import com.tloot.integration.LiuChatBridge;
 import net.md_5.bungee.api.chat.TextComponent;
 import com.tloot.util.TreasureBlocks;
+import com.tloot.util.TreasureLabel;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -82,12 +83,12 @@ public class TreasureListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerInteract(PlayerInteractEvent event) {
-        if (event.getHand() != EquipmentSlot.HAND) {
-            return;
-        }
-
         Player player = event.getPlayer();
-        ItemStack item = player.getInventory().getItemInMainHand();
+        EquipmentSlot hand = event.getHand() != null ? event.getHand() : EquipmentSlot.HAND;
+        // 指针在主手或副手都应当可用：玩家往往主手拿武器、副手放指针
+        ItemStack item = hand == EquipmentSlot.OFF_HAND
+                ? player.getInventory().getItemInOffHand()
+                : player.getInventory().getItemInMainHand();
 
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
             Block clickedBlock = event.getClickedBlock();
@@ -99,11 +100,11 @@ public class TreasureListener implements Listener {
 
         if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK)
                 && PointerItem.isPointer(item)) {
-            handlePointerUse(player, item, event);
+            handlePointerUse(player, item, hand, event);
         }
     }
 
-    private void handlePointerUse(Player player, ItemStack item, PlayerInteractEvent event) {
+    private void handlePointerUse(Player player, ItemStack item, EquipmentSlot hand, PlayerInteractEvent event) {
         String treasureId = PointerItem.getTreasureId(item);
         if (treasureId == null) {
             return;
@@ -113,13 +114,13 @@ public class TreasureListener implements Listener {
 
         if (treasure == null) {
             player.sendMessage(plugin.getMessageManager().get("expire.pointer-expired"));
-            player.getInventory().setItemInMainHand(null);
+            clearHandItem(player, hand);
             return;
         }
 
         if (treasure.isExpired()) {
             player.sendMessage(plugin.getMessageManager().get("expire.treasure-expired"));
-            player.getInventory().setItemInMainHand(null);
+            clearHandItem(player, hand);
             try {
                 treasureManager().expireTreasure(treasureId);
             } catch (RuntimeException e) {
@@ -135,16 +136,35 @@ public class TreasureListener implements Listener {
 
         event.setCancelled(true);
         Location treasureLoc = treasure.getLocation();
-        player.setCompassTarget(treasureLoc);
 
-        // 跨世界时 Location#distance 会抛 IllegalArgumentException，必须判断世界是否一致
-        if (player.getWorld().equals(treasureLoc.getWorld())) {
-            player.sendMessage(ChatColor.GREEN + "指针已指向宝藏 #" + treasureId + "，距离 "
-                    + (int) Math.round(player.getLocation().distance(treasureLoc)) + " 格");
-        } else {
-            player.sendMessage(ChatColor.GREEN + "指针已指向宝藏 #" + treasureId);
-            player.sendMessage(ChatColor.GRAY + "该宝藏位于其它世界: " + ChatColor.AQUA
+        // 跨世界时 Location#distance 会抛 IllegalArgumentException，必须判断世界是否一致。
+        // 指南针本身也只能指向同一维度，跨世界时不能假装"已指向"，否则玩家会跟着乱转。
+        if (!player.getWorld().equals(treasureLoc.getWorld())) {
+            player.sendMessage(ChatColor.RED + "该宝藏位于其它世界: " + ChatColor.AQUA
                     + plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName()));
+            player.sendMessage(ChatColor.GRAY + "请先前往该世界，指南针才能指向宝藏。");
+            // 让 ActionBar 的跨世界提示立即出现，而不是等下个 tick
+            plugin.getPointerListener().refreshNow(player);
+            return;
+        }
+
+        // 立即重新下发指南针目标（重生/切世界后目标可能已被服务端重置成出生点）
+        plugin.getPointerListener().refreshNow(player);
+        player.sendMessage(ChatColor.GREEN + "指针已指向「" + TreasureLabel.plain(treasure) + "」，距离 "
+                + (int) Math.round(player.getLocation().distance(treasureLoc)) + " 格");
+        if (treasure.isDoom() && plugin.getDoomTreasureManager() != null
+                && plugin.getDoomTreasureManager().isGuarded(treasure.getId())) {
+            player.sendMessage(ChatColor.DARK_RED + "⚠ 厄运守卫尚未清除（剩余 "
+                    + plugin.getDoomTreasureManager().remainingGuards(treasure.getId())
+                    + " 只），全部击败后宝箱才会出现。");
+        }
+    }
+
+    private void clearHandItem(Player player, EquipmentSlot hand) {
+        if (hand == EquipmentSlot.OFF_HAND) {
+            player.getInventory().setItemInOffHand(null);
+        } else {
+            player.getInventory().setItemInMainHand(null);
         }
     }
 

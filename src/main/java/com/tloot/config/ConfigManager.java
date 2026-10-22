@@ -10,6 +10,7 @@ import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -21,6 +22,7 @@ public class ConfigManager {
     private Map<String, String> worldNames;
     private List<LootEntry> lootTable;
     private Map<String, int[]> autoTreasureWorldRanges;
+    private Map<String, Integer> doomMobs;
 
     public ConfigManager(TLoot plugin) {
         this.plugin = plugin;
@@ -28,6 +30,7 @@ public class ConfigManager {
         this.worldNames = new HashMap<>();
         this.lootTable = new ArrayList<>();
         this.autoTreasureWorldRanges = new HashMap<>();
+        this.doomMobs = new LinkedHashMap<>();
     }
 
     public void loadConfig() {
@@ -37,6 +40,8 @@ public class ConfigManager {
         loadWorldNames();
         loadLootTable();
         loadAutoTreasureWorlds();
+        loadDoomMobs();
+        warnMissingWorldNames();
     }
 
     public void reloadConfig() {
@@ -46,6 +51,28 @@ public class ConfigManager {
         loadWorldNames();
         loadLootTable();
         loadAutoTreasureWorlds();
+        loadDoomMobs();
+        warnMissingWorldNames();
+    }
+
+    /**
+     * world-names 缺少映射时，公告和界面会直接显示英文世界名（如 zysj）。
+     * 启动/重载时给出明确警告，避免管理员误以为是插件乱码或英文 ID。
+     */
+    private void warnMissingWorldNames() {
+        List<String> worlds = new ArrayList<>(allowedWorlds);
+        for (String world : autoTreasureWorldRanges.keySet()) {
+            if (!worlds.contains(world)) {
+                worlds.add(world);
+            }
+        }
+        for (String world : worlds) {
+            String display = worldNames.get(world);
+            if (display == null || display.isBlank()) {
+                plugin.getLogger().warning("world-names 缺少世界 \"" + world
+                        + "\" 的中文名，公告会显示英文世界名；请在 config.yml 的 world-names 下补充映射。");
+            }
+        }
     }
 
     private void loadAllowedWorlds() {
@@ -266,6 +293,58 @@ public class ConfigManager {
      */
     public int[] getAutoTreasureWorldRange(String worldName) {
         return autoTreasureWorldRanges.get(worldName);
+    }
+
+    // ==================== 厄运宝藏 ====================
+
+    private void loadDoomMobs() {
+        doomMobs.clear();
+        ConfigurationSection section = config.getConfigurationSection("doom-treasure.mobs");
+        if (section == null) {
+            return;
+        }
+        for (String mobName : section.getKeys(false)) {
+            int count = config.getInt("doom-treasure.mobs." + mobName, 1);
+            if (count > 0) {
+                doomMobs.put(mobName, count);
+            }
+        }
+    }
+
+    public boolean isDoomTreasureEnabled() {
+        return config.getBoolean("doom-treasure.enabled", false);
+    }
+
+    /** 每次自动寻宝生成时转为厄运宝藏的概率 */
+    public double getDoomChance() {
+        double chance = config.getDouble("doom-treasure.chance", 0.25);
+        return Math.max(0.0, Math.min(1.0, chance));
+    }
+
+    /** MythicMobs 内部名 → 生成数量 */
+    public Map<String, Integer> getDoomMobs() {
+        return new LinkedHashMap<>(doomMobs);
+    }
+
+    public int getDoomSpawnRadius() {
+        int radius = config.getInt("doom-treasure.spawn-radius", 6);
+        return Math.max(2, Math.min(32, radius));
+    }
+
+    public double getDoomCoinMultiplier() {
+        double multiplier = config.getDouble("doom-treasure.coin-multiplier", 3.0);
+        return Math.max(1.0, multiplier);
+    }
+
+    public double getDoomTicketMultiplier() {
+        double multiplier = config.getDouble("doom-treasure.ticket-multiplier", 2.0);
+        return Math.max(1.0, multiplier);
+    }
+
+    /** 在普通战利品基础上额外抽取的次数 */
+    public int getDoomExtraLootRolls() {
+        int rolls = config.getInt("doom-treasure.extra-loot-rolls", 3);
+        return Math.max(0, Math.min(10, rolls));
     }
 
     // ==================== 存储设置 ====================

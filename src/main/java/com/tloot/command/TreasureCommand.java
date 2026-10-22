@@ -6,6 +6,7 @@ import com.tloot.data.Treasure;
 import com.tloot.data.TreasureManager;
 import com.tloot.gui.GUIManager;
 import com.tloot.item.PointerItem;
+import com.tloot.util.TreasureLabel;
 import net.milkbowl.vault.economy.Economy;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.ChatColor;
@@ -145,7 +146,7 @@ public class TreasureCommand implements CommandExecutor, TabCompleter {
         
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
         player.sendMessage(ChatColor.GREEN + "你成功参与了寻宝！");
-        player.sendMessage(ChatColor.GRAY + "寻宝ID: " + ChatColor.AQUA + treasure.getId());
+        player.sendMessage(ChatColor.GRAY + "寻宝: " + TreasureLabel.colored(treasure));
         player.sendMessage(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
         player.sendMessage(ChatColor.GRAY + "使用寻宝指针找到宝藏！");
     }
@@ -213,11 +214,11 @@ public class TreasureCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(ChatColor.GOLD + "========== 寻宝系统帮助 ==========");
         player.sendMessage(ChatColor.YELLOW + "/treasure " + ChatColor.GRAY + "- 打开寻宝主菜单");
         player.sendMessage(ChatColor.YELLOW + "/treasure create " + ChatColor.GRAY + "- 发起寻宝");
-        player.sendMessage(ChatColor.YELLOW + "/treasure join <ID> " + ChatColor.GRAY + "- 参与寻宝");
+        player.sendMessage(ChatColor.YELLOW + "/treasure join " + ChatColor.GRAY + "- 参与寻宝（点击公告或列表中的宝藏）");
         player.sendMessage(ChatColor.YELLOW + "/treasure list " + ChatColor.GRAY + "- 查看寻宝列表（指南针GUI）");
         player.sendMessage(ChatColor.YELLOW + "/treasure compass " + ChatColor.GRAY + "- 打开指南针领取面板");
         player.sendMessage(ChatColor.YELLOW + "/treasure my " + ChatColor.GRAY + "- 查看我的寻宝");
-        player.sendMessage(ChatColor.YELLOW + "/treasure info [ID] " + ChatColor.GRAY + "- 查看寻宝信息");
+        player.sendMessage(ChatColor.YELLOW + "/treasure info " + ChatColor.GRAY + "- 查看我参与的寻宝信息");
         player.sendMessage(ChatColor.YELLOW + "/treasure reload " + ChatColor.GRAY + "- 重载配置 (管理员)");
     }
 
@@ -235,7 +236,9 @@ public class TreasureCommand implements CommandExecutor, TabCompleter {
                 completions.add("reload");
             }
         } else if (args.length == 2
-                && (args[0].equalsIgnoreCase("join") || args[0].equalsIgnoreCase("info"))) {
+                && (args[0].equalsIgnoreCase("join") || args[0].equalsIgnoreCase("info"))
+                && sender.hasPermission("tloot.admin")) {
+            // 内部 ID 不再展示给普通玩家，仅管理员补全，方便 /treasure info <ID> 排查
             for (Treasure treasure : plugin.getTreasureManager().treasuresView()) {
                 if (!treasure.isExpired()) {
                     completions.add(treasure.getId());

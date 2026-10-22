@@ -8,6 +8,7 @@ Minecraft 寻宝插件 — 玩家发起寻宝活动，其他玩家参与争夺�
 
 - **玩家寻宝**：玩家花费金币创建寻宝活动，放置宝箱，设置保底金币和参与费用
 - **系统寻宝**：定时自动生成宝藏，按配置的世界范围随机放置，带战利品表
+- **厄运宝藏**：可选依赖 MythicMobs，按概率生成守卫怪物，全部击杀后宝箱才出现，奖励更丰厚
 - **参与机制**：支付费用参与寻宝，获得指南针指针追踪宝藏位置
 - **GUI 界面**：图形化界面发起寻宝、查看可参与的寻宝列表
 - **ActionBar 距离显示**：实时显示与宝藏的距离
@@ -24,10 +25,10 @@ Minecraft 寻宝插件 — 玩家发起寻宝活动，其他玩家参与争夺�
 |------|------|------|
 | `/treasure` | 打开寻宝主菜单 | 玩家 |
 | `/treasure create` | 打开发起寻宝界面（设置保底金币/参与费用后领取告示牌） | 玩家 |
-| `/treasure join <ID>` | 参与指定寻宝 | 玩家 |
+| `/treasure join` | 参与寻宝（在公告/列表中点击宝藏，无需记 ID） | 玩家 |
 | `/treasure list` / `/treasure compass` | 打开可参与寻宝列表（指南针面板） | 玩家 |
 | `/treasure my` | 查看我发起/参与的寻宝 | 玩家 |
-| `/treasure info [ID]` | 查看寻宝详情（不带 ID 时列出我参与的寻宝） | 玩家 |
+| `/treasure info` | 查看我参与的寻宝详情（管理员可加 ID 查询指定宝藏） | 玩家 |
 | `/treasure help` | 查看帮助 | 玩家 |
 | `/treasure reload` | 重载配置（玩家与控制台均可） | `tloot.admin` |
 
@@ -38,6 +39,7 @@ Minecraft 寻宝插件 — 玩家发起寻宝活动，其他玩家参与争夺�
 - **必需**: [Vault](https://www.spigotmc.org/resources/vault.34315/) + 任意经济插件（如 EssentialsX）
 - **必需**: **LiuLib 1.0.5+**（物品规格解析，`plugin.yml depend: [LiuLib]`；缺失时服务端拒绝加载本插件）
 - **可选**: **liuitemlib**（软依赖，`lib:<物品库ID>` 物品库引用；已加入 `plugin.yml softdepend`）
+- **可选**: **MythicMobs 5.x**（软依赖，用于「厄运宝藏」守卫怪物；未安装时自动降级为普通宝藏）
 - **多端部署**: MySQL 5.7+ / 8.x + Redis 6+
 
 ## 兼容性
@@ -132,6 +134,8 @@ redis:
 | `pointer.beacon.interval-ticks` | 20 | 光柱粒子刷新间隔（tick） |
 | `pointer.beacon.max-height` | 80 | 光柱相对宝藏的最大高度（格） |
 
+> 指针在主手或副手时都会自动指向宝藏：插件每秒重新下发一次指南针目标，因此玩家重生、切换世界、管理员修改出生点后都会自动恢复指向。指南针无法跨世界指向，此时 ActionBar 会提示宝藏所在的世界（文案见 `messages.yml` 的 `pointer.wrong-world` / `pointer.world-unavailable`）。
+
 ### 自动寻宝设置
 
 | 配置项 | 默认值 | 说明 |
@@ -143,6 +147,32 @@ redis:
 | `auto-treasure.expire-time` | 120 | 系统宝藏过期时间（分钟） |
 | `auto-treasure.min-guaranteed-coins` | 50000 | 系统宝藏保底金币最小值 |
 | `auto-treasure.max-guaranteed-coins` | 500000 | 系统宝藏保底金币最大值 |
+
+### 厄运宝藏设置（依赖 MythicMobs）
+
+开启后，自动寻宝有概率生成「厄运宝藏」：插件会在宝藏附近刷出配置的 MythicMobs 怪物，
+**全部击杀后宝箱才会出现**，同时保底金币、参与费用和战利品都更丰厚。
+
+```yaml
+doom-treasure:
+  enabled: false        # 需要安装 MythicMobs 并配置 mobs
+  chance: 0.25          # 每次自动寻宝转换为厄运宝藏的概率
+  mobs:                 # MythicMobs 内部名 → 数量
+    "SkeletalKnight": 2
+    "WitherSkeleton": 1
+  spawn-radius: 6       # 守卫出生半径（格）
+  coin-multiplier: 3.0  # 保底金币倍率
+  ticket-multiplier: 2.0
+  extra-loot-rolls: 3   # 额外抽取的战利品次数
+```
+
+说明：
+
+- `mobs` 里必须是 `/mm mobs list` 中存在的**内部名**（区分大小写），填错会在控制台提示。
+- 未安装 MythicMobs、`mobs` 为空或怪物名全部无效时，厄运宝藏会自动降级为普通宝藏，不会卡住任务。
+- 守卫在区块加载时会保留；服务端重启后，尚未解锁的厄运宝藏会重新刷出守卫，已解锁的（坐标上已有箱子）不会重复刷。
+- 多人/跨服环境下，守卫由「生成宝藏的那台服务器」维护；Redis 同步的其它服务器只同步宝藏数据，不重复刷怪。
+- 玩家界面（指南针菜单 / 我的寻宝）会显示剩余守卫数量与「守卫已清除，宝箱已现世」。
 
 ### 世界配置
 
@@ -210,7 +240,11 @@ TLoot/
 │   ├── data/
 │   │   ├── Treasure.java                # 宝藏数据类（序列化/容错反序列化）
 │   │   └── TreasureManager.java         # 宝藏管理器 + Redis 同步回调
+│   ├── doom/DoomTreasureManager.java    # 厄运宝藏守卫（MythicMobs 刷怪/击杀解锁/重启恢复）
 │   ├── gui/GUIManager.java              # GUI 构建、会话状态与归属判定
+│   ├── integration/
+│   │   ├── LiuChatBridge.java           # LiuChat 公告桥（反射，可选）
+│   │   └── MythicMobsBridge.java        # MythicMobs 刷怪桥（反射，可选）
 │   ├── item/
 │   │   ├── PointerItem.java             # 指针物品（创建/识别/刷新/回收）
 │   │   └── TreasureSignItem.java        # 寻宝告示牌物品

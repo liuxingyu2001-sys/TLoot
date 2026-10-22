@@ -129,6 +129,21 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
                                     List<ItemStack> items,
                                     List<String> commands,
                                     long expireTimeMillis) {
+        return createTreasure(ownerUuid, ownerName, location, guaranteedCoins, ticketPrice, items, commands,
+                expireTimeMillis, false);
+    }
+
+    /**
+     * @param doom 是否创建「厄运宝藏」：守卫全部被击杀后才会出现宝箱
+     */
+    public Treasure createTreasure(UUID ownerUuid, String ownerName,
+                                    Location location,
+                                    int guaranteedCoins,
+                                    int ticketPrice,
+                                    List<ItemStack> items,
+                                    List<String> commands,
+                                    long expireTimeMillis,
+                                    boolean doom) {
         // 同一坐标只允许存在一个宝藏，避免旧宝藏变成无法领取的“幽灵数据”
         Treasure occupant = findTreasureAtLocation(location);
         if (occupant != null) {
@@ -142,7 +157,7 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
 
         Treasure treasure = new Treasure(id, ownerUuid, ownerName, location,
                 guaranteedCoins, ticketPrice, items, commands, expireTimeMillis,
-                System.currentTimeMillis());
+                System.currentTimeMillis(), doom);
 
         index(treasure);
 
@@ -316,12 +331,12 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
 
         Player owner = Bukkit.getPlayer(treasure.getOwnerUuid());
         if (owner != null) {
-            owner.sendMessage(ChatColor.RED + "你的宝藏 #" + treasureId + " 已过期！");
+            owner.sendMessage(ChatColor.RED + "你的宝藏已过期！");
         }
         for (UUID participantUuid : treasure.participantsView()) {
             Player participant = Bukkit.getPlayer(participantUuid);
             if (participant != null) {
-                participant.sendMessage(ChatColor.RED + "宝藏 #" + treasureId + " 已过期！");
+                participant.sendMessage(ChatColor.RED + "你参与的宝藏已过期！");
             }
         }
     }

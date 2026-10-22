@@ -35,7 +35,7 @@ public class TreasureExpireTask extends BukkitRunnable {
     private void handleExpiredTreasure(Treasure treasure) {
         Player owner = Bukkit.getPlayer(treasure.getOwnerUuid());
         if (owner != null) {
-            owner.sendMessage(ChatColor.RED + "你的宝藏 #" + treasure.getId() + " 已过期！");
+            owner.sendMessage(ChatColor.RED + "你的宝藏已过期！");
         }
 
         for (UUID participantUuid : treasure.participantsView()) {
@@ -43,7 +43,7 @@ public class TreasureExpireTask extends BukkitRunnable {
             if (participant == null) {
                 continue;
             }
-            participant.sendMessage(ChatColor.RED + "宝藏 #" + treasure.getId() + " 已过期！");
+            participant.sendMessage(ChatColor.RED + "你参与的宝藏已过期！");
         }
     }
 }
