@@ -25,7 +25,7 @@ public final class TreasureBlocks {
      * 待清理的残留宝箱：区块未加载时无法安全移除，记录 chunkKey -> 坐标，
      * 由 {@link com.tloot.listener.TreasureChunkCleanupListener} 在区块加载时回收。
      */
-    private static final Map<Long, List<Location>> PENDING = new ConcurrentHashMap<>();
+    private static final Map<String, List<Location>> PENDING = new ConcurrentHashMap<>();
     /** 单个区块最多记录的待清理箱子数（正常情况为个位数） */
     private static final int MAX_PENDING_PER_CHUNK = 64;
 
@@ -41,7 +41,7 @@ public final class TreasureBlocks {
             return;
         }
 
-        long key = chunkKey(location);
+        String key = chunkKey(location);
         List<Location> locations = PENDING.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>());
         if (locations.size() >= MAX_PENDING_PER_CHUNK) {
             return;
@@ -64,7 +64,7 @@ public final class TreasureBlocks {
             return 0;
         }
 
-        long key = chunkKey(chunk.getWorld().getName(), chunk.getX(), chunk.getZ());
+        String key = chunkKey(chunk.getWorld().getName(), chunk.getX(), chunk.getZ());
         List<Location> locations = PENDING.remove(key);
         if (locations == null || locations.isEmpty()) {
             return 0;
@@ -79,16 +79,13 @@ public final class TreasureBlocks {
         return removed;
     }
 
-    /** 世界名 + 区块坐标的打包键 */
-    public static long chunkKey(Location location) {
+    /** 世界名 + 区块坐标的键（用字符串而不是 hashCode，避免不同区块碰撞后互相覆盖） */
+    public static String chunkKey(Location location) {
         return chunkKey(location.getWorld().getName(), location.getBlockX() >> 4, location.getBlockZ() >> 4);
     }
 
-    private static long chunkKey(String worldName, int chunkX, int chunkZ) {
-        long hash = worldName.hashCode();
-        hash = hash * 31L + chunkX;
-        hash = hash * 31L + chunkZ;
-        return hash;
+    private static String chunkKey(String worldName, int chunkX, int chunkZ) {
+        return worldName + ',' + chunkX + ',' + chunkZ;
     }
 
     public static void clearPending() {

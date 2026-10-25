@@ -59,7 +59,13 @@ public class MySQLStorage implements StorageBackend {
     private ExecutorService executor;
 
     private void enqueue(Runnable task) {
-        executor.execute(task);
+        try {
+            executor.execute(task);
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            // 队列满（2048 条待写）或已在关闭流程中：抛出明确异常，
+            // 由调用方决定是回滚（创建宝藏）还是仅记录日志（参与者落库）
+            throw new IllegalStateException("存储队列已满或已关闭，写入被拒绝", e);
+        }
     }
 
     public MySQLStorage(TLoot plugin, String host, int port, String database,
@@ -226,11 +232,16 @@ public class MySQLStorage implements StorageBackend {
         }
         String commands = String.join("\n", treasure.getCommands());
         String participants = joinParticipants(treasure.getParticipants());
+        // 坐标也在主线程取好：getLocation() 可能惰性补全世界（Bukkit.getWorld），不能放到异步线程
+        Location location = treasure.getLocation();
+        final double x = location != null ? location.getX() : 0;
+        final double y = location != null ? location.getY() : 0;
+        final double z = location != null ? location.getZ() : 0;
 
         enqueue(() -> {
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(upsertSql())) {
-                bind(ps, treasure, itemsBase64, commands, participants);
+                bind(ps, treasure, x, y, z, itemsBase64, commands, participants);
                 ps.executeUpdate();
             } catch (SQLException e) {
                 plugin.getLogger().severe("无法保存宝藏 " + treasure.getId() + ": " + e.getMessage());
@@ -263,13 +274,19 @@ public class MySQLStorage implements StorageBackend {
         }
 
         List<Treasure> snapshot = new ArrayList<>(treasures.size());
+        List<double[]> locations = new ArrayList<>(treasures.size());
         List<String> itemsData = new ArrayList<>(treasures.size());
         List<String> commandsData = new ArrayList<>(treasures.size());
         List<String> participantsData = new ArrayList<>(treasures.size());
         for (Treasure treasure : treasures) {
             try {
                 String serialized = itemStacksToBase64(treasure.getItems());
+                Location location = treasure.getLocation();
                 snapshot.add(treasure);
+                locations.add(new double[]{
+                        location != null ? location.getX() : 0,
+                        location != null ? location.getY() : 0,
+                        location != null ? location.getZ() : 0});
                 itemsData.add(serialized);
                 commandsData.add(String.join("\n", treasure.getCommands()));
                 participantsData.add(joinParticipants(treasure.getParticipants()));
@@ -290,7 +307,9 @@ public class MySQLStorage implements StorageBackend {
                 conn.setAutoCommit(false);
                 try {
                     for (int i = 0; i < snapshot.size(); i++) {
-                        bind(ps, snapshot.get(i), itemsData.get(i), commandsData.get(i), participantsData.get(i));
+                        double[] loc = locations.get(i);
+                        bind(ps, snapshot.get(i), loc[0], loc[1], loc[2],
+                                itemsData.get(i), commandsData.get(i), participantsData.get(i));
                         ps.addBatch();
                     }
                     ps.executeBatch();
@@ -320,16 +339,16 @@ public class MySQLStorage implements StorageBackend {
     }
 
     private static void bind(PreparedStatement ps, Treasure treasure,
+                             double x, double y, double z,
                              String itemsBase64, String commands, String participants) throws SQLException {
         ps.setString(1, treasure.getId());
         ps.setString(2, treasure.getOwnerUuid().toString());
         ps.setString(3, treasure.getOwnerName());
         ps.setString(4, treasure.getWorldName());
 
-        Location loc = treasure.getLocation();
-        ps.setDouble(5, loc != null ? loc.getX() : 0);
-        ps.setDouble(6, loc != null ? loc.getY() : 0);
-        ps.setDouble(7, loc != null ? loc.getZ() : 0);
+        ps.setDouble(5, x);
+        ps.setDouble(6, y);
+        ps.setDouble(7, z);
 
         ps.setInt(8, treasure.getGuaranteedCoins());
         ps.setInt(9, treasure.getTicketPrice());

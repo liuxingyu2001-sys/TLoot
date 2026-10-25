@@ -16,6 +16,11 @@ import java.util.Map;
 
 public class ConfigManager {
 
+    /** 金币相关配置的上限，防止 nextInt 溢出与离谱数值 */
+    private static final int MAX_COINS = 100_000_000;
+    /** 坐标范围上限（略大于原版世界边界 30,000,000），同时保证区间宽度不会让 int 溢出 */
+    private static final int MAX_COORDINATE = 30_000_000;
+
     private final TLoot plugin;
     private FileConfiguration config;
     private List<String> allowedWorlds;
@@ -102,23 +107,36 @@ public class ConfigManager {
     }
 
     public int getClaimDistance() {
-        return config.getInt("settings.claim-distance", 5);
+        // 负数会让距离校验出现「贴脸也领不了」；过大则等于取消距离限制
+        return Math.max(1, Math.min(32, config.getInt("settings.claim-distance", 5)));
     }
 
     public long getExpireTime() {
-        return config.getLong("settings.expire-time", 360) * 60 * 1000;
+        return expireMillis(config.getLong("settings.expire-time", 360));
+    }
+
+    /** 过期时间（分钟）→ 毫秒：至少 1 分钟、最多 1 年，避免 0 或超大数值导致过期判定/溢出异常 */
+    private static long expireMillis(long minutes) {
+        long safe = Math.max(1L, Math.min(525_600L, minutes));
+        return safe * 60_000L;
     }
 
     public int getMinGuaranteedCoins() {
-        return config.getInt("settings.min-guaranteed-coins", 100000);
+        return Math.max(0, Math.min(MAX_COINS, config.getInt("settings.min-guaranteed-coins", 100000)));
     }
 
     public int getMaxGuaranteedCoins() {
-        return config.getInt("settings.max-guaranteed-coins", 1000000);
+        int max = Math.max(0, Math.min(MAX_COINS, config.getInt("settings.max-guaranteed-coins", 1000000)));
+        return Math.max(getMinGuaranteedCoins(), max);
     }
 
     public int getMinTicketPrice() {
-        return config.getInt("settings.min-ticket-price", 500);
+        return Math.max(0, Math.min(MAX_COINS, config.getInt("settings.min-ticket-price", 500)));
+    }
+
+    /** 发起者是否获得门票收入（关闭后门票作为系统回收） */
+    public boolean isOwnerIncomeEnabled() {
+        return config.getBoolean("settings.owner-income", true);
     }
 
     public boolean isPointerActionBarEnabled() {
@@ -132,12 +150,13 @@ public class ConfigManager {
     }
 
     public int getBeaconIntervalTicks() {
-        return config.getInt("pointer.beacon.interval-ticks", 20);
+        // runTaskTimer 的 period 必须 >= 1，配置成 0 会直接抛异常导致重载失败
+        return Math.max(5, Math.min(200, config.getInt("pointer.beacon.interval-ticks", 20)));
     }
 
     /** 光柱相对宝藏的最大高度（格），避免在世界最高处生成大量粒子 */
     public int getBeaconMaxHeight() {
-        return config.getInt("pointer.beacon.max-height", 80);
+        return Math.max(0, Math.min(320, config.getInt("pointer.beacon.max-height", 80)));
     }
 
     public int getGuiSize(String guiName) {
@@ -237,27 +256,29 @@ public class ConfigManager {
     }
 
     public int getAutoTreasureInterval() {
-        return config.getInt("auto-treasure.interval", 30);
+        return Math.max(1, Math.min(1440, config.getInt("auto-treasure.interval", 30)));
     }
 
     public int getAutoTreasureMaxActive() {
-        return config.getInt("auto-treasure.max-active", 3);
+        return Math.max(1, Math.min(50, config.getInt("auto-treasure.max-active", 3)));
     }
 
     public int getAutoTreasureTicketPrice() {
-        return config.getInt("auto-treasure.ticket-price", 300);
+        return Math.max(0, Math.min(MAX_COINS, config.getInt("auto-treasure.ticket-price", 300)));
     }
 
     public long getAutoTreasureExpireTime() {
-        return config.getLong("auto-treasure.expire-time", 120) * 60 * 1000;
+        return expireMillis(config.getLong("auto-treasure.expire-time", 120));
     }
 
     public int getAutoTreasureMinCoins() {
-        return config.getInt("auto-treasure.min-guaranteed-coins", 50000);
+        return Math.max(0, Math.min(MAX_COINS, config.getInt("auto-treasure.min-guaranteed-coins", 50000)));
     }
 
     public int getAutoTreasureMaxCoins() {
-        return config.getInt("auto-treasure.max-guaranteed-coins", 500000);
+        int max = Math.max(0, Math.min(MAX_COINS,
+                config.getInt("auto-treasure.max-guaranteed-coins", 500000)));
+        return Math.max(getAutoTreasureMinCoins(), max);
     }
 
     private void loadAutoTreasureWorlds() {
@@ -268,14 +289,26 @@ public class ConfigManager {
         }
         for (String worldName : section.getKeys(false)) {
             String base = "auto-treasure.worlds." + worldName;
-            int minX = config.getInt(base + ".min-x", -5000);
-            int maxX = config.getInt(base + ".max-x", 5000);
-            int minZ = config.getInt(base + ".min-z", -5000);
-            int maxZ = config.getInt(base + ".max-z", 5000);
-            int minY = config.getInt(base + ".min-y", 5);
-            int maxY = config.getInt(base + ".max-y", 256);
+            int minX = clampCoordinate(config.getInt(base + ".min-x", -5000));
+            int maxX = clampCoordinate(config.getInt(base + ".max-x", 5000));
+            int minZ = clampCoordinate(config.getInt(base + ".min-z", -5000));
+            int maxZ = clampCoordinate(config.getInt(base + ".max-z", 5000));
+            int minY = Math.max(-64, Math.min(320, config.getInt(base + ".min-y", 5)));
+            int maxY = Math.max(-64, Math.min(320, config.getInt(base + ".max-y", 256)));
+            if (minX > maxX || minZ > maxZ || minY > maxY) {
+                plugin.getLogger().warning("auto-treasure.worlds." + worldName
+                        + " 的坐标区间为反向 (min > max)，已自动纠正；建议修正配置");
+                int tmp;
+                if (minX > maxX) { tmp = minX; minX = maxX; maxX = tmp; }
+                if (minZ > maxZ) { tmp = minZ; minZ = maxZ; maxZ = tmp; }
+                if (minY > maxY) { tmp = minY; minY = maxY; maxY = tmp; }
+            }
             autoTreasureWorldRanges.put(worldName, new int[]{minX, maxX, minZ, maxZ, minY, maxY});
         }
+    }
+
+    private static int clampCoordinate(int value) {
+        return Math.max(-MAX_COORDINATE, Math.min(MAX_COORDINATE, value));
     }
 
     /**
@@ -297,17 +330,32 @@ public class ConfigManager {
 
     // ==================== 厄运宝藏 ====================
 
+    /** 单个怪物条目最多生成数量，避免误配置成上千只把服务器刷崩 */
+    private static final int MAX_DOOM_MOBS_PER_TYPE = 20;
+    /** 所有守卫怪物总数上限 */
+    private static final int MAX_DOOM_MOBS_TOTAL = 50;
+
     private void loadDoomMobs() {
         doomMobs.clear();
         ConfigurationSection section = config.getConfigurationSection("doom-treasure.mobs");
         if (section == null) {
             return;
         }
+        int total = 0;
         for (String mobName : section.getKeys(false)) {
-            int count = config.getInt("doom-treasure.mobs." + mobName, 1);
-            if (count > 0) {
-                doomMobs.put(mobName, count);
+            if (total >= MAX_DOOM_MOBS_TOTAL) {
+                plugin.getLogger().warning("doom-treasure.mobs 守卫总数超过 " + MAX_DOOM_MOBS_TOTAL
+                        + "，超出部分已忽略；请检查配置是否合理");
+                break;
             }
+            int raw = config.getInt("doom-treasure.mobs." + mobName, 1);
+            if (raw <= 0) {
+                continue;
+            }
+            int count = Math.min(MAX_DOOM_MOBS_PER_TYPE, raw);
+            int allowed = Math.min(count, MAX_DOOM_MOBS_TOTAL - total);
+            doomMobs.put(mobName, allowed);
+            total += allowed;
         }
     }
 
@@ -318,6 +366,9 @@ public class ConfigManager {
     /** 每次自动寻宝生成时转为厄运宝藏的概率 */
     public double getDoomChance() {
         double chance = config.getDouble("doom-treasure.chance", 0.25);
+        if (!Double.isFinite(chance)) {
+            return 0.0;
+        }
         return Math.max(0.0, Math.min(1.0, chance));
     }
 
@@ -332,13 +383,20 @@ public class ConfigManager {
     }
 
     public double getDoomCoinMultiplier() {
-        double multiplier = config.getDouble("doom-treasure.coin-multiplier", 3.0);
-        return Math.max(1.0, multiplier);
+        return doomMultiplier("coin-multiplier", 3.0);
     }
 
     public double getDoomTicketMultiplier() {
-        double multiplier = config.getDouble("doom-treasure.ticket-multiplier", 2.0);
-        return Math.max(1.0, multiplier);
+        return doomMultiplier("ticket-multiplier", 2.0);
+    }
+
+    /** 倍率必须有限且不超过 100，避免 NaN/Infinity 造成金币溢出或变成 0 */
+    private double doomMultiplier(String key, double def) {
+        double multiplier = config.getDouble("doom-treasure." + key, def);
+        if (!Double.isFinite(multiplier)) {
+            return 1.0;
+        }
+        return Math.max(1.0, Math.min(100.0, multiplier));
     }
 
     /** 在普通战利品基础上额外抽取的次数 */
@@ -380,7 +438,7 @@ public class ConfigManager {
     }
 
     public int getDatabasePoolSize() {
-        return config.getInt("database.pool-size", 10);
+        return Math.max(1, Math.min(64, config.getInt("database.pool-size", 10)));
     }
 
     // ==================== Redis 设置 ====================

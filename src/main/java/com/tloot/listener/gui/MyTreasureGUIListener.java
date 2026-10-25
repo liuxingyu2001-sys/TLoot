@@ -79,7 +79,7 @@ public class MyTreasureGUIListener extends AbstractGUIListener {
         }
 
         if (treasureId != null && !treasureId.isEmpty()) {
-            handleMyTreasureClick(player, treasureId);
+            handleMyTreasureClick(player, treasureId, event.isShiftClick());
         }
     }
 
@@ -114,7 +114,7 @@ public class MyTreasureGUIListener extends AbstractGUIListener {
         return id.length() == 8 ? id.toString().toUpperCase() : null;
     }
 
-    private void handleMyTreasureClick(Player player, String treasureId) {
+    private void handleMyTreasureClick(Player player, String treasureId, boolean shiftClick) {
         Treasure treasure = plugin.getTreasureManager().getTreasure(treasureId);
         GUIManager guiManager = plugin.getGuiManager();
 
@@ -133,7 +133,11 @@ public class MyTreasureGUIListener extends AbstractGUIListener {
         }
 
         if (treasure.getOwnerUuid().equals(player.getUniqueId())) {
-            sendOwnerDetails(player, treasure);
+            if (shiftClick) {
+                guiManager.requestCancel(player, treasure);
+            } else {
+                sendOwnerDetails(player, treasure);
+            }
             return;
         }
 

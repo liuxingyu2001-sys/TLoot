@@ -10,7 +10,10 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class MessageManager {
@@ -19,6 +22,7 @@ public class MessageManager {
     private final File messagesFile;
     private FileConfiguration messagesConfig;
     private final Map<String, String> messages = new HashMap<>();
+    private final Map<String, List<String>> messageLists = new HashMap<>();
 
     public MessageManager(TLoot plugin) {
         this.plugin = plugin;
@@ -40,6 +44,7 @@ public class MessageManager {
         }
 
         messages.clear();
+        messageLists.clear();
         for (String key : messagesConfig.getKeys(true)) {
             if (messagesConfig.isString(key)) {
                 String raw = messagesConfig.getString(key);
@@ -48,6 +53,8 @@ public class MessageManager {
                 }
                 // 支持在配置里用 \n 断行：先翻译颜色码，再把字面量 \n 转成真正的换行符
                 messages.put(key, ChatColor.translateAlternateColorCodes('&', raw).replace("\\n", "\n"));
+            } else if (messagesConfig.isList(key)) {
+                messageLists.put(key, translateList(messagesConfig.getStringList(key)));
             }
         }
 
@@ -64,7 +71,24 @@ public class MessageManager {
                     messages.put(key, ChatColor.translateAlternateColorCodes('&', raw).replace("\\n", "\n"));
                 }
             }
+            for (String key : defaultConfig.getKeys(true)) {
+                if (messageLists.containsKey(key) || !defaultConfig.isList(key)) {
+                    continue;
+                }
+                messageLists.put(key, translateList(defaultConfig.getStringList(key)));
+            }
         }
+    }
+
+    private static List<String> translateList(List<String> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> translated = new ArrayList<>(raw.size());
+        for (String line : raw) {
+            translated.add(ChatColor.translateAlternateColorCodes('&', line == null ? "" : line));
+        }
+        return Collections.unmodifiableList(translated);
     }
     public String get(String key) {
         return messages.getOrDefault(key, "&c消息未找到: " + key);
@@ -78,6 +102,11 @@ public class MessageManager {
             }
         }
         return message;
+    }
+
+    /** 读取列表型消息（如指针 Lore）；缺少时返回空列表，由调用方兜底 */
+    public List<String> getList(String key) {
+        return messageLists.getOrDefault(key, Collections.emptyList());
     }
 
     public void saveMessages() {

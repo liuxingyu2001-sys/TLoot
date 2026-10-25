@@ -82,6 +82,16 @@ public class TLoot extends JavaPlugin {
             yamlStorage.init();
         }
 
+        try {
+            treasureManager.loadTreasures();
+            treasuresLoaded = true;
+        } catch (RuntimeException e) {
+            getLogger().severe("宝藏数据加载失败，插件已禁用: " + e.getMessage());
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
+        // Redis 必须在本地数据加载完成后再启动：否则加载期间的跨服创建消息会被随后的 loadTreasures 清空
         if (configManager.isRedisEnabled()) {
             redisSyncManager = new RedisSyncManager(this,
                     configManager.getRedisHost(),
@@ -91,15 +101,6 @@ public class TLoot extends JavaPlugin {
                     configManager.getRedisServerId());
             treasureManager.setSyncManager(redisSyncManager);
             redisSyncManager.init(treasureManager);
-        }
-
-        try {
-            treasureManager.loadTreasures();
-            treasuresLoaded = true;
-        } catch (RuntimeException e) {
-            getLogger().severe("宝藏数据加载失败，插件已禁用: " + e.getMessage());
-            getServer().getPluginManager().disablePlugin(this);
-            return;
         }
 
         guiManager = new GUIManager(this);

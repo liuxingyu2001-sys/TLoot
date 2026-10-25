@@ -240,7 +240,10 @@ public class TreasureListener implements Listener {
         }
 
         player.sendMessage(plugin.getMessageManager().get("claim.success"));
-        player.sendMessage(ChatColor.GREEN + "你获得了 " + ChatColor.GOLD + coins + ChatColor.GREEN + " 金币！");
+        if (coins > 0) {
+            player.sendMessage(plugin.getMessageManager().get("claim.coins",
+                    "coins", String.valueOf(coins)));
+        }
 
         for (String command : treasure.getCommands()) {
             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command.replace("{player}", player.getName()));
@@ -249,7 +252,8 @@ public class TreasureListener implements Listener {
         // 本服公告在此发出；其它子服的公告由 Redis 的 onTreasureClaimed 回调发出
         // （不能只依赖回调：Redis 默认关闭时回调根本不会触发，公告会完全消失）
         String announcement = plugin.getMessageManager().get("prefix")
-                + "§e" + player.getName() + " §a找到了 §e" + treasure.getOwnerName() + " §a发起的宝藏！";
+                + plugin.getMessageManager().get("broadcast.claimed",
+                "claimer", player.getName(), "owner", treasure.getOwnerName());
         if (!LiuChatBridge.broadcast(player, new TextComponent(announcement))) {
             plugin.getServer().broadcastMessage(announcement);
         }

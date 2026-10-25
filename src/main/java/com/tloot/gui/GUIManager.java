@@ -12,6 +12,7 @@ import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
@@ -48,6 +49,8 @@ public class GUIManager {
     private final Map<UUID, Integer> playerTicketPrice = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> playerCompassPage = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> playerMyPage = new ConcurrentHashMap<>();
+    /** 取消寻宝的二次确认（UUID → 待确认的宝藏ID + 请求时间） */
+    private final Map<UUID, CancelRequest> pendingCancel = new ConcurrentHashMap<>();
 
     /**
      * 本插件创建的 GUI 实例。
@@ -205,7 +208,9 @@ public class GUIManager {
 
         List<String> loreList = new ArrayList<>();
         for (String line : lore) {
-            loreList.add(line);
+            if (line != null) {
+                loreList.add(line);
+            }
         }
         meta.setLore(loreList);
 
@@ -328,8 +333,13 @@ public class GUIManager {
      * 刷新发起寻宝菜单（不重新打开界面，避免闪烁）
      */
     public void refreshCreateMenu(Player player) {
-        Inventory inv = player.getOpenInventory().getTopInventory();
-        fillCreateMenuItems(inv, player.getUniqueId());
+        InventoryView view = player.getOpenInventory();
+        // 界面可能已被其它插件替换/关闭：此时不应往别人的背包里写物品
+        if (!isGUIOpen(player, GUI_CREATE, view)) {
+            openCreateMenu(player);
+            return;
+        }
+        fillCreateMenuItems(view.getTopInventory(), player.getUniqueId());
         player.updateInventory();
     }
 
@@ -489,11 +499,7 @@ public class GUIManager {
             lore.add(ChatColor.GRAY + "发起者: " + ownerLabel);
             lore.add(typeTag);
             if (isDoom) {
-                int remaining = doomRemaining(treasure);
-                lore.add(remaining > 0
-                        ? ChatColor.DARK_RED + "守卫: " + ChatColor.RED + remaining + " 只存活"
-                        + ChatColor.GRAY + "（全部击杀后宝箱才会出现）"
-                        : ChatColor.GREEN + "守卫已清除，宝箱已现世");
+                lore.add(doomStatusLine(treasure));
             }
             lore.add(ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + formatNumber(treasure.getGuaranteedCoins()));
             lore.add(ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + formatNumber(treasure.getTicketPrice()));
@@ -501,7 +507,13 @@ public class GUIManager {
             lore.add(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
             lore.add(ChatColor.GRAY + "剩余时间: " + ChatColor.RED + treasure.getRemainingTimeFormatted());
             lore.add("");
-            lore.add(ChatColor.YELLOW + "点击领取寻宝指针！");
+            boolean joined = treasure.hasParticipant(player.getUniqueId());
+            if (joined) {
+                lore.add(ChatColor.GREEN + "✔ 你已参与此寻宝");
+                lore.add(ChatColor.YELLOW + "点击重新获取寻宝指针！");
+            } else {
+                lore.add(ChatColor.YELLOW + "点击领取寻宝指针！");
+            }
 
             ItemStack treasureItem = createGuiItem(icon,
                     (isDoom ? ChatColor.DARK_RED : isSystem ? ChatColor.GOLD : ChatColor.GREEN)
@@ -509,6 +521,15 @@ public class GUIManager {
                     lore.toArray(new String[0]));
 
             inv.setItem(i - startIndex, tagTreasure(treasureItem, treasure));
+        }
+
+        // 空状态：一个可参与的宝藏都没有时给出明确提示
+        if (treasures.isEmpty()) {
+            inv.setItem(4, createGuiItem(Material.PAPER,
+                    ChatColor.YELLOW + "暂无可参与的寻宝",
+                    ChatColor.GRAY + "等待系统刷新，或由其他玩家发起新的寻宝",
+                    "",
+                    ChatColor.GRAY + "自己发起: 主菜单 → 发起寻宝"));
         }
 
         // 底部导航栏
@@ -600,13 +621,7 @@ public class GUIManager {
                 String countColor = pCount > 0 ? ChatColor.GREEN.toString() : ChatColor.GRAY.toString();
                 Material icon = isDoom ? Material.WITHER_SKELETON_SKULL : Material.CHEST;
                 String title = isDoom ? ChatColor.DARK_RED + "✦ 厄运宝藏" : ChatColor.GOLD + "✦ 你的寻宝";
-                String doomStatus = "";
-                if (isDoom) {
-                    int remaining = doomRemaining(treasure);
-                    doomStatus = remaining > 0
-                            ? ChatColor.DARK_RED + "守卫: " + ChatColor.RED + remaining + " 只存活"
-                            : ChatColor.GREEN + "守卫已清除，宝箱已现世";
-                }
+                String doomStatus = isDoom ? doomStatusLine(treasure) : null;
 
                 treasureItem = createGuiItem(icon,
                         title,
@@ -621,7 +636,10 @@ public class GUIManager {
                         ChatColor.GRAY + "坐标: " + ChatColor.DARK_GREEN +
                                 (int)treasure.getLocation().getX() + ", " +
                                 (int)treasure.getLocation().getY() + ", " +
-                                (int)treasure.getLocation().getZ());
+                                (int)treasure.getLocation().getZ(),
+                        "",
+                        ChatColor.YELLOW + "左键: 查看详情",
+                        ChatColor.RED + "Shift+左键: 取消寻宝" + ChatColor.GRAY + "（需无人参与）");
             } else {
                 treasureItem = createGlowingGuiItem(
                         isDoom ? Material.WITHER_SKELETON_SKULL : Material.COMPASS,
@@ -737,10 +755,72 @@ public class GUIManager {
         player.sendMessage(ChatColor.GREEN + "=================================");
     }
 
-    /** 厄运宝藏当前剩余的守卫数量（未启用/已解锁返回 0） */
-    private int doomRemaining(Treasure treasure) {
+    // ==================== 取消寻宝（二次确认） ====================
+
+    private record CancelRequest(String treasureId, long time) {
+    }
+
+    /**
+     * 「我的寻宝」中 Shift+左键取消自己发起的寻宝。
+     * 第一次点击只做确认提示，30 秒内再次点击同一宝藏才真正取消，避免误触。
+     */
+    public void requestCancel(Player player, Treasure treasure) {
+        UUID uuid = player.getUniqueId();
+        CancelRequest pending = pendingCancel.get(uuid);
+        long now = System.currentTimeMillis();
+
+        if (pending != null && pending.treasureId().equals(treasure.getId())
+                && now - pending.time() < 30_000L) {
+            pendingCancel.remove(uuid);
+            if (!plugin.getTreasureManager().cancelForOwner(treasure, player)) {
+                player.sendMessage(plugin.getMessageManager().get("cancel.has-participants",
+                        "count", String.valueOf(treasure.getParticipantCount())));
+                playFailSound(player);
+                return;
+            }
+            player.sendMessage(plugin.getMessageManager().get("cancel.success"));
+            playSuccessSound(player);
+            openMyTreasureGUI(player, getMyPage(uuid));
+            return;
+        }
+
+        if (treasure.getParticipantCount() > 0) {
+            pendingCancel.remove(uuid);
+            player.sendMessage(plugin.getMessageManager().get("cancel.has-participants",
+                    "count", String.valueOf(treasure.getParticipantCount())));
+            playFailSound(player);
+            return;
+        }
+
+        pendingCancel.put(uuid, new CancelRequest(treasure.getId(), now));
+        player.sendMessage(plugin.getMessageManager().get("cancel.confirm"));
+        playClickSound(player);
+    }
+
+    /** 厄运宝藏状态行：守卫存活 → 已清空 → 尚未刷新（区块未加载时无法判断） */
+    private String doomStatusLine(Treasure treasure) {
         DoomTreasureManager doom = plugin.getDoomTreasureManager();
-        return doom != null ? doom.remainingGuards(treasure.getId()) : 0;
+        int remaining = doom != null ? doom.remainingGuards(treasure.getId()) : 0;
+        if (remaining > 0) {
+            return ChatColor.DARK_RED + "守卫: " + ChatColor.RED + remaining + " 只存活"
+                    + ChatColor.GRAY + "（全部击杀后宝箱才会出现）";
+        }
+        if (isChestPresent(treasure)) {
+            return ChatColor.GREEN + "守卫已清除，宝箱已现世";
+        }
+        return ChatColor.YELLOW + "守卫状态未知（靠近宝藏后自动刷新）";
+    }
+
+    /** 只在区块已加载时判断，避免构建 GUI 时强制加载区块 */
+    private boolean isChestPresent(Treasure treasure) {
+        Location loc = treasure.getLocation();
+        if (loc == null || loc.getWorld() == null) {
+            return false;
+        }
+        if (!loc.getWorld().isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) {
+            return false;
+        }
+        return loc.getBlock().getType() == Material.CHEST;
     }
 
     // ==================== 进度条工具 ====================
@@ -839,6 +919,7 @@ public class GUIManager {
         playerMyPage.remove(uuid);
         playerCreateCoins.remove(uuid);
         playerTicketPrice.remove(uuid);
+        pendingCancel.remove(uuid);
     }
 
     public int getCompassPage(UUID uuid) {
@@ -856,6 +937,7 @@ public class GUIManager {
         playerTicketPrice.clear();
         playerCompassPage.clear();
         playerMyPage.clear();
+        pendingCancel.clear();
         trackedInventories.clear();
     }
 

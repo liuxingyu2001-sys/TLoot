@@ -19,7 +19,7 @@ import java.util.List;
 
 public class PointerItem {
 
-    private static final String POINTER_NAME = "&b寻宝指针";
+    private static final String DEFAULT_POINTER_NAME = "&b寻宝指针";
     private static final Material POINTER_MATERIAL = Material.COMPASS;
     private static final String TREASURE_ID_KEY = "treasure_id";
 
@@ -45,8 +45,10 @@ public class PointerItem {
             return pointer;
         }
 
-        String displayName = ChatColor.translateAlternateColorCodes('&', POINTER_NAME);
-        meta.setDisplayName(displayName);
+        String displayName = pluginMessage("pointer.name");
+        meta.setDisplayName(displayName.isEmpty()
+                ? ChatColor.translateAlternateColorCodes('&', DEFAULT_POINTER_NAME)
+                : displayName);
         meta.setLore(buildLore(treasure));
 
         meta.addEnchant(Enchantment.LURE, 1, true);
@@ -116,16 +118,41 @@ public class PointerItem {
         TLoot plugin = TLoot.getInstance();
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
 
-        List<String> lore = new ArrayList<>(8);
-        lore.add(ChatColor.GRAY + "发起者: " + ChatColor.YELLOW + treasure.getOwnerName());
-        lore.add(ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins());
-        lore.add(ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + treasure.getTicketPrice());
-        lore.add(ChatColor.GRAY + "剩余时间: " + ChatColor.RED + treasure.getRemainingTimeFormatted());
-        lore.add(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
-        lore.add("");
-        lore.add(ChatColor.GREEN + "手持时指南针自动指向宝藏");
-        lore.add(ChatColor.GREEN + "右键查看距离和方向");
+        // 优先使用 messages.yml 的 pointer.lore（支持 {owner}/{coins}/{price}/{time}/{world}），
+        // 老服务器缺少该键时退回内置文本
+        List<String> template = plugin.getMessageManager().getList("pointer.lore");
+        if (template.isEmpty()) {
+            List<String> fallback = new ArrayList<>(8);
+            fallback.add(ChatColor.GRAY + "发起者: " + ChatColor.YELLOW + treasure.getOwnerName());
+            fallback.add(ChatColor.GRAY + "保底金币: " + ChatColor.GOLD + treasure.getGuaranteedCoins());
+            fallback.add(ChatColor.GRAY + "参与费用: " + ChatColor.GOLD + treasure.getTicketPrice());
+            fallback.add(ChatColor.GRAY + "剩余时间: " + ChatColor.RED + treasure.getRemainingTimeFormatted());
+            fallback.add(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
+            fallback.add("");
+            fallback.add(ChatColor.GREEN + "手持时指南针自动指向宝藏");
+            fallback.add(ChatColor.GREEN + "右键查看距离和方向");
+            return fallback;
+        }
+
+        List<String> lore = new ArrayList<>(template.size());
+        for (String line : template) {
+            lore.add(line
+                    .replace("{owner}", treasure.getOwnerName() == null ? "" : treasure.getOwnerName())
+                    .replace("{coins}", String.valueOf(treasure.getGuaranteedCoins()))
+                    .replace("{price}", String.valueOf(treasure.getTicketPrice()))
+                    .replace("{time}", treasure.getRemainingTimeFormatted())
+                    .replace("{world}", worldDisplayName));
+        }
         return lore;
+    }
+
+    private static String pluginMessage(String key) {
+        TLoot plugin = TLoot.getInstance();
+        if (plugin == null) {
+            return "";
+        }
+        String value = plugin.getMessageManager().get(key);
+        return value == null || value.startsWith("&c消息未找到") ? "" : value;
     }
 
     /**

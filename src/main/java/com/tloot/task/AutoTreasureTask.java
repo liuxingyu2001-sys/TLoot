@@ -273,6 +273,12 @@ public class AutoTreasureTask extends BukkitRunnable {
                 continue;
             }
 
+            // 箱子上方必须仍在世界高度内，否则 setType 会失败并留下一条无法领取的宝藏记录
+            if (highestY + 1 >= world.getMaxHeight()) {
+                skippedYRange++;
+                continue;
+            }
+
             Location chestLoc = new Location(world, x + 0.5, highestY + 1, z + 0.5);
 
             Block ground = chestLoc.clone().subtract(0, 1, 0).getBlock();

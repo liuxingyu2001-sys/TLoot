@@ -2,11 +2,9 @@ package com.tloot.listener.gui;
 
 import com.tloot.TLoot;
 import com.tloot.data.Treasure;
+import com.tloot.data.TreasureManager;
 import com.tloot.gui.GUIManager;
-import com.tloot.item.PointerItem;
 import com.tloot.util.TreasureLabel;
-import net.milkbowl.vault.economy.Economy;
-import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -15,8 +13,6 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
-import java.util.Map;
-import java.util.UUID;
 
 public class CompassGUIListener extends AbstractGUIListener {
 
@@ -133,64 +129,54 @@ public class CompassGUIListener extends AbstractGUIListener {
             return;
         }
 
-        if (treasure.isExpired()) {
-            player.sendMessage(ChatColor.RED + "该宝藏已过期！");
-            GUIManager.playFailSound(player);
-            guiManager.openCompassMenu(player, guiManager.getCompassPage(player.getUniqueId()));
-            return;
+        // 命令与 GUI 共用同一套校验/扣费/发指针逻辑
+        TreasureManager.JoinResult result = plugin.getTreasureManager().joinTreasure(player, treasure);
+        switch (result) {
+            case NOT_FOUND -> {
+                player.sendMessage(ChatColor.RED + "该宝藏已不存在！");
+                GUIManager.playFailSound(player);
+                guiManager.openCompassMenu(player, guiManager.getCompassPage(player.getUniqueId()));
+            }
+            case EXPIRED -> {
+                player.sendMessage(ChatColor.RED + "该宝藏已过期！");
+                GUIManager.playFailSound(player);
+                guiManager.openCompassMenu(player, guiManager.getCompassPage(player.getUniqueId()));
+            }
+            case OWNER -> {
+                player.sendMessage(ChatColor.RED + "你不能参与自己发起的寻宝！");
+                GUIManager.playFailSound(player);
+            }
+            case NO_SPACE -> {
+                player.sendMessage(ChatColor.RED + "背包已满，请先腾出空间再领取寻宝指针！");
+                GUIManager.playFailSound(player);
+            }
+            case NO_MONEY -> {
+                player.sendMessage(plugin.getMessageManager().get("general.no-money"));
+                GUIManager.playFailSound(player);
+            }
+            case CHARGE_FAILED -> {
+                player.sendMessage(ChatColor.RED + "扣款失败，请稍后重试或联系管理员。");
+                GUIManager.playFailSound(player);
+            }
+            case ALREADY_HAS_POINTER -> {
+                player.sendMessage(plugin.getMessageManager().get("join.already-has-pointer"));
+                GUIManager.playFailSound(player);
+            }
+            case REJOIN_POINTER -> {
+                player.closeInventory();
+                GUIManager.playSuccessSound(player);
+                player.sendMessage(plugin.getMessageManager().get("join.rejoin"));
+                player.sendMessage(ChatColor.GRAY + "寻宝: " + TreasureLabel.colored(treasure));
+            }
+            case SUCCESS -> {
+                player.closeInventory();
+                GUIManager.playSuccessSound(player);
+                player.sendMessage(ChatColor.GREEN + "你成功领取了寻宝指针！");
+                player.sendMessage(ChatColor.GRAY + "寻宝: " + TreasureLabel.colored(treasure));
+                player.sendMessage(ChatColor.GRAY + "世界: " + ChatColor.AQUA
+                        + plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName()));
+                player.sendMessage(ChatColor.GRAY + "手持指南针找到宝藏吧！");
+            }
         }
-
-        UUID uuid = player.getUniqueId();
-
-        if (treasure.getOwnerUuid().equals(uuid)) {
-            player.sendMessage(ChatColor.RED + "你不能参与自己发起的寻宝！");
-            GUIManager.playFailSound(player);
-            return;
-        }
-
-        if (treasure.hasParticipant(uuid)) {
-            player.sendMessage(ChatColor.YELLOW + "你已经参与了此寻宝！");
-            GUIManager.playFailSound(player);
-            return;
-        }
-
-        // 背包满时不允许扣费：原实现先扣费再 addItem，放不下的指针会掉在地上，玩家等于白花钱
-        if (player.getInventory().firstEmpty() == -1) {
-            player.sendMessage(ChatColor.RED + "背包已满，请先腾出空间再领取寻宝指针！");
-            GUIManager.playFailSound(player);
-            return;
-        }
-
-        Economy economy = plugin.getEconomy();
-        int ticketPrice = treasure.getTicketPrice();
-
-        if (economy.getBalance(player) < ticketPrice) {
-            player.sendMessage(plugin.getMessageManager().get("general.no-money"));
-            GUIManager.playFailSound(player);
-            return;
-        }
-
-        EconomyResponse withdraw = economy.withdrawPlayer(player, ticketPrice);
-        if (!withdraw.transactionSuccess()) {
-            player.sendMessage(ChatColor.RED + "扣款失败: " + withdraw.errorMessage);
-            GUIManager.playFailSound(player);
-            return;
-        }
-
-        plugin.getTreasureManager().addParticipant(treasureId, uuid);
-
-        Map<Integer, ItemStack> leftover = player.getInventory().addItem(PointerItem.createPointer(treasure));
-        for (ItemStack item : leftover.values()) {
-            player.getWorld().dropItemNaturally(player.getLocation(), item);
-        }
-
-        player.closeInventory();
-        GUIManager.playSuccessSound(player);
-
-        String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
-        player.sendMessage(ChatColor.GREEN + "你成功领取了寻宝指针！");
-        player.sendMessage(ChatColor.GRAY + "寻宝: " + TreasureLabel.colored(treasure));
-        player.sendMessage(ChatColor.GRAY + "世界: " + ChatColor.AQUA + worldDisplayName);
-        player.sendMessage(ChatColor.GRAY + "手持指南针找到宝藏吧！");
     }
 }

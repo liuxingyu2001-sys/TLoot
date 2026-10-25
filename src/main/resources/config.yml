@@ -47,6 +47,10 @@ settings:
   # 参与费用的最小值（不能为0）
   min-ticket-price: 500
 
+  # 门票收入是否结算给发起者（true: 每位参与者支付的门票归发起者，发起者才有收益；
+  # false: 门票直接回收，发起者只能拿回「被找到」的保底金币——不推荐）
+  owner-income: true
+
 # 寻宝指针设置
 pointer:
   # 是否在 ActionBar 显示实时距离

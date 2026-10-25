@@ -10,14 +10,18 @@ import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.ComponentBuilder;
 import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
+import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -181,15 +185,38 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
     }
 
     public void removeTreasure(String id) {
+        removeTreasure(id, false);
+    }
+
+    /**
+     * 移除宝藏（管理员取消、创建回滚等）。
+     *
+     * @param announce 是否全服公告「寻宝已被取消」；创建失败回滚等内部路径不应公告
+     */
+    public void removeTreasure(String id, boolean announce) {
         Treasure treasure = unindex(id);
         if (storage != null) {
-            storage.delete(id);
+            try {
+                storage.delete(id);
+            } catch (RuntimeException e) {
+                // 数据已从内存移除，落库失败只影响重启后的残留，记录后继续清理世界中的箱子
+                plugin.getLogger().warning("删除宝藏 #" + id + " 的存储记录失败: " + e.getMessage());
+            }
         }
         if (syncManager != null) {
-            syncManager.publishRemove(id);
+            try {
+                syncManager.publishRemove(id);
+            } catch (RuntimeException e) {
+                plugin.getLogger().warning("宝藏 #" + id + " 已移除，但 Redis 广播失败: " + e.getMessage());
+            }
         }
         if (treasure != null) {
+            TreasureBlocks.removeChest(treasure.getLocation());
+            cancelGuards(id);
             removePointers(treasure);
+            if (announce) {
+                broadcastCancelled(treasure);
+            }
         }
     }
 
@@ -197,9 +224,16 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         Treasure treasure = treasures.get(id);
         if (treasure == null) return;
         if (storage != null) {
-            storage.delete(id);
+            try {
+                storage.delete(id);
+            } catch (RuntimeException e) {
+                plugin.getLogger().warning("删除已领取宝藏 #" + id + " 的存储记录失败: " + e.getMessage());
+            }
         }
         unindex(id);
+        cancelGuards(id);
+        // 所有参与者的指针都要回收；只回收领取者的话，其他参与者背包里会留下永久失效的指南针
+        removePointers(treasure);
         if (syncManager != null) {
             try {
                 syncManager.publishClaim(id, claimerName, treasure.getOwnerName());
@@ -212,13 +246,82 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
     public void expireTreasure(String id) {
         Treasure treasure = treasures.get(id);
         if (treasure == null) return;
-        if (storage != null) storage.delete(id);
+        if (storage != null) {
+            try {
+                storage.delete(id);
+            } catch (RuntimeException e) {
+                plugin.getLogger().warning("删除过期宝藏 #" + id + " 的存储记录失败: " + e.getMessage());
+            }
+        }
         unindex(id);
         TreasureBlocks.removeChest(treasure.getLocation());
+        cancelGuards(id);
         if (syncManager != null) {
-            syncManager.publishExpire(id);
+            try {
+                syncManager.publishExpire(id);
+            } catch (RuntimeException e) {
+                plugin.getLogger().warning("宝藏 #" + id + " 已过期，但 Redis 广播失败: " + e.getMessage());
+            }
         }
         removePointers(treasure);
+    }
+
+    /**
+     * 发起者主动取消（无人参与时）：移除宝藏并把保底金币与箱内物品原样退还。
+     *
+     * <p>只有「没有参与者」时才允许走到这里，所以退还不会产生刷钱空间；
+     * 管理员强制移除请用 {@link #removeTreasure(String, boolean)}，不退押金。</p>
+     */
+    public boolean cancelForOwner(Treasure treasure, Player owner) {
+        if (treasure == null || owner == null) {
+            return false;
+        }
+        if (!treasure.getOwnerUuid().equals(owner.getUniqueId())) {
+            return false;
+        }
+        if (treasure.getParticipantCount() > 0) {
+            return false;
+        }
+
+        removeTreasure(treasure.getId(), true);
+
+        Economy economy = plugin.getEconomy();
+        int refund = Math.max(0, treasure.getGuaranteedCoins());
+        if (refund > 0 && economy != null) {
+            EconomyResponse response = economy.depositPlayer(owner, refund);
+            if (!response.transactionSuccess()) {
+                plugin.getLogger().warning("取消宝藏 #" + treasure.getId() + " 时退还 "
+                        + refund + " 金币失败: " + response.errorMessage);
+                owner.sendMessage(plugin.getMessageManager().get("cancel.refund-failed"));
+            }
+        }
+
+        List<ItemStack> items = treasure.getItems();
+        if (!items.isEmpty()) {
+            for (ItemStack leftover : owner.getInventory()
+                    .addItem(items.toArray(new ItemStack[0])).values()) {
+                owner.getWorld().dropItemNaturally(owner.getLocation(), leftover);
+            }
+        }
+        return true;
+    }
+
+    /** 宝藏消失后清掉守卫，避免野外残留 MythicMobs 怪物 */
+    private void cancelGuards(String treasureId) {
+        if (plugin.getDoomTreasureManager() != null) {
+            plugin.getDoomTreasureManager().cancel(treasureId);
+        }
+    }
+
+    private void broadcastCancelled(Treasure treasure) {
+        String announcement = plugin.getMessageManager().get("prefix")
+                + plugin.getMessageManager().get("broadcast.cancelled",
+                "owner", treasure.getOwnerName() == null ? "未知" : treasure.getOwnerName(),
+                "world", plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName()));
+        if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null),
+                new TextComponent(announcement))) {
+            plugin.getServer().broadcastMessage(announcement);
+        }
     }
 
     /**
@@ -240,10 +343,143 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         }
 
         if (storage != null) {
-            storage.save(treasure);
+            try {
+                storage.save(treasure);
+            } catch (RuntimeException e) {
+                // 玩家已经扣费，不能因为一次落库失败就让参与流程报错；
+                // 内存中已记录参与资格，关闭服务器时的全量保存会补写
+                plugin.getLogger().warning("保存参与者数据失败（宝藏 #" + treasureId + "）: " + e.getMessage());
+            }
         }
         if (syncManager != null) {
-            syncManager.publishJoin(treasureId, participantUuid);
+            try {
+                syncManager.publishJoin(treasureId, participantUuid);
+            } catch (RuntimeException e) {
+                plugin.getLogger().warning("同步参与信息失败（宝藏 #" + treasureId + "）: " + e.getMessage());
+            }
+        }
+    }
+
+    // ==================== 参与寻宝（命令与 GUI 共用同一套校验/扣费逻辑） ====================
+
+    public enum JoinResult {
+        /** 首次参与成功，已扣费并发放指针 */
+        SUCCESS,
+        /** 已经参与过，补发了一个新指针（不重复扣费） */
+        REJOIN_POINTER,
+        /** 已经参与过，且背包里已有该宝藏的指针 */
+        ALREADY_HAS_POINTER,
+        NOT_FOUND,
+        EXPIRED,
+        OWNER,
+        NO_SPACE,
+        NO_MONEY,
+        CHARGE_FAILED
+    }
+
+    /**
+     * 参与寻宝：校验世界/费用/背包，扣费、记录参与者、发放指针，并把门票收入结算给发起者。
+     *
+     * <p>命令 {@code /treasure join} 与指南针 GUI 都走这里，避免两套实现行为不一致
+     * （例如一边先扣费再检查背包、另一边先检查背包）。</p>
+     */
+    public JoinResult joinTreasure(Player player, Treasure treasure) {
+        if (treasure == null) {
+            return JoinResult.NOT_FOUND;
+        }
+        if (treasure.isExpired()) {
+            return JoinResult.EXPIRED;
+        }
+
+        UUID uuid = player.getUniqueId();
+        if (treasure.getOwnerUuid().equals(uuid)) {
+            return JoinResult.OWNER;
+        }
+
+        boolean alreadyJoined = treasure.hasParticipant(uuid);
+        if (!alreadyJoined) {
+            if (player.getInventory().firstEmpty() == -1) {
+                return JoinResult.NO_SPACE;
+            }
+
+            Economy economy = plugin.getEconomy();
+            if (economy == null) {
+                return JoinResult.CHARGE_FAILED;
+            }
+            int price = Math.max(0, treasure.getTicketPrice());
+            if (economy.getBalance(player) < price) {
+                return JoinResult.NO_MONEY;
+            }
+
+            EconomyResponse withdraw = economy.withdrawPlayer(player, price);
+            if (!withdraw.transactionSuccess()) {
+                plugin.getLogger().warning("玩家 " + player.getName() + " 参与宝藏 #" + treasure.getId()
+                        + " 扣费失败: " + withdraw.errorMessage);
+                return JoinResult.CHARGE_FAILED;
+            }
+
+            addParticipant(treasure.getId(), uuid);
+            payOwnerIncome(treasure, player.getName(), price);
+        }
+
+        boolean hasPointer = hasPointer(player, treasure.getId());
+        if (hasPointer) {
+            return alreadyJoined ? JoinResult.ALREADY_HAS_POINTER : JoinResult.SUCCESS;
+        }
+
+        if (player.getInventory().firstEmpty() == -1) {
+            // 首次参与已在扣费前检查过背包，这里只可能是老参与者背包已满
+            return JoinResult.NO_SPACE;
+        }
+        for (ItemStack leftover : player.getInventory()
+                .addItem(PointerItem.createPointer(treasure)).values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), leftover);
+        }
+        return alreadyJoined ? JoinResult.REJOIN_POINTER : JoinResult.SUCCESS;
+    }
+
+    private boolean hasPointer(Player player, String treasureId) {
+        for (ItemStack item : player.getInventory().getContents()) {
+            String id = PointerItem.getTreasureId(item);
+            if (id != null && id.equals(treasureId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 门票收入结算给发起者：发起者已预先支付保底金币作为奖励，
+     * 门票是发起者的收益，否则「发起寻宝」只会亏钱，没人愿意发起。
+     * 系统宝藏没有发起者，门票作为系统回收（防止无限刷金币）。
+     */
+    private void payOwnerIncome(Treasure treasure, String payerName, int price) {
+        if (price <= 0 || SYSTEM_OWNER_UUID.equals(treasure.getOwnerUuid())) {
+            return;
+        }
+        if (!plugin.getConfigManager().isOwnerIncomeEnabled()) {
+            return;
+        }
+
+        Economy economy = plugin.getEconomy();
+        if (economy == null) {
+            return;
+        }
+        try {
+            OfflinePlayer owner = Bukkit.getOfflinePlayer(treasure.getOwnerUuid());
+            EconomyResponse deposit = economy.depositPlayer(owner, price);
+            if (!deposit.transactionSuccess()) {
+                plugin.getLogger().warning("无法结算宝藏 #" + treasure.getId() + " 的门票收入给 "
+                        + treasure.getOwnerName() + ": " + deposit.errorMessage);
+                return;
+            }
+            Player online = owner.getPlayer();
+            if (online != null) {
+                online.sendMessage(plugin.getMessageManager().get("join.owner-income",
+                        "player", payerName, "amount", String.valueOf(price)));
+            }
+        } catch (RuntimeException e) {
+            plugin.getLogger().warning("结算门票收入时出错（宝藏 #" + treasure.getId() + "）: " + e.getMessage());
         }
     }
 
@@ -264,9 +500,6 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
 
         index(treasure);
 
-        if (LiuChatBridge.available()) {
-            return;
-        }
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
         boolean isSystem = SYSTEM_OWNER_UUID.equals(treasure.getOwnerUuid());
 
@@ -297,7 +530,9 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         Treasure treasure = unindex(treasureId);
         if (treasure != null) {
             TreasureBlocks.removeChest(treasure.getLocation());
+            cancelGuards(treasureId);
             removePointers(treasure);
+            broadcastCancelled(treasure);
         }
     }
 
@@ -307,10 +542,10 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         if (treasure != null) {
             // 其他子服完成领取后，本服可能还留着同一个箱子，必须一并移除，否则会残留可被拾取的宝箱
             TreasureBlocks.removeChest(treasure.getLocation());
+            cancelGuards(treasureId);
             removePointers(treasure);
         }
 
-        if (LiuChatBridge.available()) return;
         String announcement = plugin.getMessageManager().get("prefix")
                 + plugin.getMessageManager().get("broadcast.claimed", "claimer", claimerName, "owner", ownerName);
         if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null),
@@ -327,6 +562,7 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         }
 
         TreasureBlocks.removeChest(treasure.getLocation());
+        cancelGuards(treasureId);
         removePointers(treasure);
 
         Player owner = Bukkit.getPlayer(treasure.getOwnerUuid());
@@ -380,26 +616,30 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
                 available.add(treasure);
             }
         }
+        // 新发起的排在前面（列表按创建时间倒序），方便玩家优先看到最新活动
+        available.sort(Comparator.comparingLong(Treasure::getCreateTime).reversed());
         return available;
     }
 
     public List<Treasure> getTreasuresByOwner(UUID ownerUuid) {
         List<Treasure> owned = new ArrayList<>();
         for (Treasure treasure : treasures.values()) {
-            if (treasure.getOwnerUuid().equals(ownerUuid)) {
+            if (treasure.getOwnerUuid().equals(ownerUuid) && !treasure.isExpired()) {
                 owned.add(treasure);
             }
         }
+        owned.sort(Comparator.comparingLong(Treasure::getCreateTime).reversed());
         return owned;
     }
 
     public List<Treasure> getTreasuresByParticipant(UUID participantUuid) {
         List<Treasure> participating = new ArrayList<>();
         for (Treasure treasure : treasures.values()) {
-            if (treasure.hasParticipant(participantUuid)) {
+            if (treasure.hasParticipant(participantUuid) && !treasure.isExpired()) {
                 participating.add(treasure);
             }
         }
+        participating.sort(Comparator.comparingLong(Treasure::getCreateTime).reversed());
         return participating;
     }
 

@@ -64,12 +64,12 @@ public class Treasure {
                     long expireTime, long createTime, boolean doom) {
         this.id = id;
         this.ownerUuid = ownerUuid;
-        this.ownerName = ownerName;
+        this.ownerName = ownerName == null || ownerName.isBlank() ? "未知" : ownerName;
         this.worldName = worldName;
         this.location = location;
         this.guaranteedCoins = guaranteedCoins;
         this.ticketPrice = ticketPrice;
-        this.items = new ArrayList<>(items);
+        this.items = items != null ? new ArrayList<>(items) : new ArrayList<>();
         this.commands = commands != null ? new ArrayList<>(commands) : new ArrayList<>();
         this.createTime = createTime;
         this.expireTime = expireTime;
@@ -143,27 +143,35 @@ public class Treasure {
     }
 
     public boolean isExpired() {
-        if (expireTime <= 0) {
+        if (expireTime <= 0 || createTime <= 0) {
             // 数据损坏或旧格式（缺少过期时间）时按已过期处理，避免永不过期的宝藏堆积
             return true;
         }
-        return System.currentTimeMillis() > createTime + expireTime;
+        // 用「已存在时长」比较而不是 createTime + expireTime：
+        // 后者在 createTime 异常（手工改库）时可能发生 long 溢出，导致宝藏被误判为已过期
+        return System.currentTimeMillis() - createTime > expireTime;
     }
 
     public long getRemainingTime() {
-        if (expireTime <= 0) {
+        if (expireTime <= 0 || createTime <= 0) {
             return 0L;
         }
-        return Math.max(0L, (createTime + expireTime) - System.currentTimeMillis());
+        return Math.max(0L, expireTime - (System.currentTimeMillis() - createTime));
     }
 
     public String getRemainingTimeFormatted() {
         long remaining = getRemainingTime();
-        if (remaining == 0) {
+        if (remaining <= 0) {
             return "即将过期";
+        }
+        if (remaining < 60_000L) {
+            return "不足1分钟";
         }
         long hours = remaining / (1000 * 60 * 60);
         long minutes = (remaining % (1000 * 60 * 60)) / (1000 * 60);
+        if (hours <= 0) {
+            return minutes + "分钟";
+        }
         return hours + "小时" + minutes + "分钟";
     }
 

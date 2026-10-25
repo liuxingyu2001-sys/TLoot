@@ -40,6 +40,8 @@ public class YamlStorage implements StorageBackend {
     private volatile boolean flushing = false;
     /** 写入序号：异步写入完成时若已有更新的快照在写，则不再清除 flushing 标记 */
     private final AtomicLong writeSequence = new AtomicLong();
+    /** 插件关闭后禁止任何异步写入，避免旧快照覆盖 close() 写出的最终数据 */
+    private volatile boolean closed = false;
     private BukkitTask flushTask;
 
     public YamlStorage(TLoot plugin) {
@@ -125,7 +127,7 @@ public class YamlStorage implements StorageBackend {
     }
 
     private void flush() {
-        if (flushing) {
+        if (flushing || closed) {
             return;
         }
         Supplier<Collection<Treasure>> supplier = treasuresSupplier;
@@ -155,6 +157,9 @@ public class YamlStorage implements StorageBackend {
     }
 
     private void writeToDisk(Collection<Treasure> treasures) {
+        if (closed) {
+            return;
+        }
         FileConfiguration dataConfig = buildConfig(treasures);
 
         if (dataFile.getParentFile() != null && !dataFile.getParentFile().exists()
@@ -168,15 +173,15 @@ public class YamlStorage implements StorageBackend {
 
         // 文件 IO 放到异步线程，避免大存档阻塞服务器主线程；
         // 插件正在关闭时调度器已不可用，直接同步写入
-        if (!plugin.isEnabled()) {
-            writeSync(dataConfig);
+        if (closed || !plugin.isEnabled()) {
+            writeSync(dataConfig, true);
             flushing = false;
             return;
         }
 
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
-                writeSync(dataConfig);
+                writeSync(dataConfig, false);
             } finally {
                 // 期间若有更新的写入启动，则由那次写入负责复位标记
                 if (writeSequence.get() == sequence) {
@@ -190,9 +195,13 @@ public class YamlStorage implements StorageBackend {
      * 实际写文件。用锁串行化：定时任务的异步写入与关闭时的同步写入可能并发，
      * 若旧快照后写入完成，会用过期数据覆盖新数据。
      */
-    private void writeSync(FileConfiguration dataConfig) {
+    private void writeSync(FileConfiguration dataConfig, boolean force) {
         writeLock.lock();
         try {
+            // 关闭后的异步写入直接丢弃：close() 会用最新快照同步写一次
+            if (closed && !force) {
+                return;
+            }
             dataConfig.save(dataFile);
         } catch (IOException e) {
             plugin.getLogger().severe("无法保存宝藏数据: " + e.getMessage());
@@ -212,13 +221,14 @@ public class YamlStorage implements StorageBackend {
             flushTask.cancel();
             flushTask = null;
         }
-        // 关闭时必须同步落盘，确保数据不丢失
+        // 标记关闭后，任何尚未执行的异步写入都会在拿到锁时被丢弃，保证最终快照一定是 close() 写出的这份
+        closed = true;
         if (treasuresSupplier != null) {
             writeToDiskSync(new ArrayList<>(treasuresSupplier.get()));
         }
     }
 
     private void writeToDiskSync(Collection<Treasure> treasures) {
-        writeSync(buildConfig(treasures));
+        writeSync(buildConfig(treasures), true);
     }
 }

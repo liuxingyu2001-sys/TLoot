@@ -19,12 +19,26 @@ join:
   already-joined: "&c你已经参与了此寻宝！"
   cannot-join-own: "&c你不能参与自己发起的寻宝！"
   treasure-not-found: "&c找不到该寻宝！"
+  # 已参与但背包里没有指针时补发
+  rejoin: "&a你已参与此寻宝，已重新发放寻宝指针！"
+  already-has-pointer: "&e你背包里已经有这个宝藏的指针了，手持它去寻找宝藏吧。"
+  # 门票收入结算给发起者（settings.owner-income: true 时）
+  owner-income: "&e{player} &a参与了你的寻宝，你获得 &6{amount} &a金币门票收入。"
 
 claim:
   success: "&a恭喜你找到了宝藏！获得了奖励！"
   too-far: "&c你离宝藏太远了！请靠近一些。"
   no-pointer: "&c你需要手持寻宝指针才能领取宝藏！"
   not-your-treasure: "&c这个宝藏不是你参与的寻宝！"
+  coins: "&a你获得了 &6{coins} &a金币！"
+
+# 取消寻宝（发起者在「我的寻宝」中 Shift+左键，或 /treasure cancel <ID>）
+cancel:
+  success: "&a已取消该寻宝，保底金币与箱内物品已退还。"
+  confirm: "&e再次 Shift+左键同一宝藏确认取消（30 秒内有效，将退还保底金币与箱内物品）。"
+  refund-failed: "&c退还保底金币失败，请联系管理员处理。"
+  not-owner: "&c这不是你发起的寻宝！"
+  has-participants: "&c已有 {count} 人参与，无法取消；请等待过期或联系管理员。"
 
 expire:
   treasure-expired: "&c寻宝已过期，宝藏已消失。"
@@ -41,15 +55,20 @@ broadcast:
   doom-created: "&4☠ 厄运宝藏 &c出现了！&7击败守卫才能开启宝箱，奖励更加丰厚！ &7世界: &a{world} &7保底: &6{coins}"
   doom-cleared: "&4☠ 厄运宝藏 &a的守卫已被击败，宝箱现世！ &7世界: &a{world}"
   hover-join-doom: "&4点击参与此厄运宝藏"
+  cancelled: "&e{owner} &7发起的寻宝已被取消（世界: &a{world}&7）"
 
 pointer:
   name: "&b寻宝指针"
+  # 指针物品描述，支持 {owner} {coins} {price} {time} {world}
   lore:
     - "&7发起者: &e{owner}"
     - "&7保底金币: &6{coins}"
+    - "&7参与费用: &6{price}"
     - "&7剩余时间: &c{time}"
+    - "&7世界: &b{world}"
     - ""
-    - "&7指向宝藏方向..."
+    - "&a手持时指南针自动指向宝藏"
+    - "&a右键查看距离和方向"
   # 指针与宝藏不在同一世界时，显示在 ActionBar 的提示（指南针无法跨世界指向）
   wrong-world: "&e宝藏位于 &b{world}&e，请先前往该世界"
   # 宝藏所在世界当前未加载时的提示

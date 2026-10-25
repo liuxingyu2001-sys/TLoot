@@ -221,11 +221,15 @@ public class DoomTreasureManager implements Listener {
                 }
             }
 
-            // 只补刷，不改变 remaining（守卫仍然算没死）
-            for (SpawnSlot slot : missing) {
-                UUID uuid = MythicMobsBridge.spawn(slot.mobName(), slot.location());
-                if (uuid != null) {
-                    guard.alive.put(uuid, slot);
+            // 只补刷，不改变 remaining（守卫仍然算没死）。
+            // 附近没有玩家时不补刷：MythicMobs 的 Despawn 会在无人时清掉怪物，
+            // 若此时仍每秒补刷，未加载区域的守卫会无限「消失→重生」空转。
+            if (!missing.isEmpty() && hasNearbyPlayer(guard.location)) {
+                for (SpawnSlot slot : missing) {
+                    UUID uuid = MythicMobsBridge.spawn(slot.mobName(), slot.location());
+                    if (uuid != null) {
+                        guard.alive.put(uuid, slot);
+                    }
                 }
             }
         }
@@ -233,12 +237,18 @@ public class DoomTreasureManager implements Listener {
 
     private void syncLoadedTreasures() {
         for (Treasure treasure : plugin.getTreasureManager().treasuresView()) {
-            if (!treasure.isDoom() || guarded.containsKey(treasure.getId())
+            if (!treasure.isDoom() || treasure.isExpired() || guarded.containsKey(treasure.getId())
                     || spawnFailed.contains(treasure.getId())) {
                 continue;
             }
             Location location = treasure.getLocation();
             if (location == null || location.getWorld() == null) {
+                continue;
+            }
+            // 不加载未加载的区块：每秒对每个厄运宝藏 getBlock() 会强制把区块读进内存，
+            // 宝藏多时等于常驻区块。玩家靠近、区块自然加载后的下一次 tick 再处理即可。
+            if (!location.getWorld().isChunkLoaded(
+                    location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
                 continue;
             }
             if (location.getBlock().getType() == Material.CHEST) {
@@ -256,6 +266,20 @@ public class DoomTreasureManager implements Listener {
                 unlock(guard);
             }
         }
+    }
+
+    /** 守卫位置附近是否有玩家（64 格），用于决定是否补刷自然消失的守卫 */
+    private boolean hasNearbyPlayer(Location location) {
+        World world = location.getWorld();
+        if (world == null) {
+            return false;
+        }
+        for (Player player : world.getPlayers()) {
+            if (player.getLocation().distanceSquared(location) <= 64 * 64) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @EventHandler
