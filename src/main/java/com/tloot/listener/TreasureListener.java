@@ -1,10 +1,10 @@
 package com.tloot.listener;
 
 import com.tloot.TLoot;
+import com.tloot.util.Announcer;
 import com.tloot.data.Treasure;
 import com.tloot.data.TreasureManager;
 import com.tloot.item.PointerItem;
-import com.tloot.integration.LiuChatBridge;
 import net.md_5.bungee.api.chat.TextComponent;
 import com.tloot.util.TreasureBlocks;
 import com.tloot.util.TreasureLabel;
@@ -254,8 +254,7 @@ public class TreasureListener implements Listener {
         String announcement = plugin.getMessageManager().get("prefix")
                 + plugin.getMessageManager().get("broadcast.claimed",
                 "claimer", player.getName(), "owner", treasure.getOwnerName());
-        if (!LiuChatBridge.broadcast(player, new TextComponent(announcement))) {
-            plugin.getServer().broadcastMessage(announcement);
-        }
+        // 只发本服；其它子服由 Redis 同步的 onTreasureClaimed 回调各自公告一次
+        Announcer.announceText(announcement);
     }
 }

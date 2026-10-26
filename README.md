@@ -19,6 +19,7 @@ Minecraft 寻宝插件 — 玩家发起寻宝活动，其他玩家参与争夺�
 - **MySQL 存储**：可选 MySQL 持久化，自动建库建表，HikariCP 连接池 + 异步写入
 - **指针自动回收**：宝藏被领取 / 过期 / 被移除时，自动清除所有在线玩家背包中对应的寻宝指针
 - **Redis 跨服同步**：多端子服务器实时同步宝藏创建、领取、过期、加入等事件及广播
+  （公告职责划分：本服公告由插件自己发、跨服公告由 Redis 发，每个子服各收到一次，不会重复）
 
 ## 命令
 
@@ -251,7 +252,6 @@ TLoot/
 │   ├── doom/DoomTreasureManager.java    # 厄运宝藏守卫（MythicMobs 刷怪/击杀解锁/重启恢复）
 │   ├── gui/GUIManager.java              # GUI 构建、会话状态与归属判定
 │   ├── integration/
-│   │   ├── LiuChatBridge.java           # LiuChat 公告桥（反射，可选）
 │   │   └── MythicMobsBridge.java        # MythicMobs 刷怪桥（反射，可选）
 │   ├── item/
 │   │   ├── PointerItem.java             # 指针物品（创建/识别/刷新/回收）
@@ -275,6 +275,7 @@ TLoot/
 │   │   ├── AutoTreasureTask.java        # 定时自动寻宝
 │   │   └── TreasureExpireTask.java      # 过期清理
 │   └── util/
+│       ├── Announcer.java               # 本服公告（与 Redis 跨服公告分工，避免重复）
 │       └── TreasureBlocks.java          # 宝藏箱子清理（本地与跨服共用）
 └── src/main/resources/
     ├── config.yml                       # 默认配置

@@ -1,7 +1,7 @@
 package com.tloot.data;
 
 import com.tloot.TLoot;
-import com.tloot.integration.LiuChatBridge;
+import com.tloot.util.Announcer;
 import com.tloot.item.PointerItem;
 import com.tloot.storage.StorageBackend;
 import com.tloot.sync.RedisSyncManager;
@@ -318,10 +318,7 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
                 + plugin.getMessageManager().get("broadcast.cancelled",
                 "owner", treasure.getOwnerName() == null ? "未知" : treasure.getOwnerName(),
                 "world", plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName()));
-        if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null),
-                new TextComponent(announcement))) {
-            plugin.getServer().broadcastMessage(announcement);
-        }
+        Announcer.announceText(announcement);
     }
 
     /**
@@ -502,9 +499,13 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
 
         String worldDisplayName = plugin.getConfigManager().getWorldDisplayName(treasure.getWorldName());
         boolean isSystem = SYSTEM_OWNER_UUID.equals(treasure.getOwnerUuid());
+        // 厄运宝藏要用专属文案，否则其它子服会收到一条「普通系统寻宝」的公告
+        boolean isDoom = treasure.isDoom() && plugin.getConfigManager().isDoomTreasureEnabled();
+        String messageKey = isDoom
+                ? "broadcast.doom-created"
+                : (isSystem ? "broadcast.system-created" : "broadcast.player-created");
 
-        String body = plugin.getMessageManager().get(
-                isSystem ? "broadcast.system-created" : "broadcast.player-created",
+        String body = plugin.getMessageManager().get(messageKey,
                 "owner", treasure.getOwnerName() == null ? "" : treasure.getOwnerName(),
                 "coins", String.valueOf(treasure.getGuaranteedCoins()),
                 "price", String.valueOf(treasure.getTicketPrice()),
@@ -514,15 +515,11 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
         message.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/treasure join " + treasure.getId()));
         message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
                 new ComponentBuilder(plugin.getMessageManager().get(
-                        isSystem ? "broadcast.hover-join-system" : "broadcast.hover-join")).create()));
+                        isDoom ? "broadcast.hover-join-doom"
+                                : (isSystem ? "broadcast.hover-join-system" : "broadcast.hover-join"))).create()));
 
-        Player carrier = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
-        if (!LiuChatBridge.broadcast(carrier, message)) {
-            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
-                if (!isSystem && onlinePlayer.getUniqueId().equals(treasure.getOwnerUuid())) continue;
-                onlinePlayer.spigot().sendMessage(message);
-            }
-        }
+        // 只发本服；跨服由 Redis 同步的 onTreasureCreated 回调在各子服各公告一次
+        Announcer.announce(isSystem ? null : treasure.getOwnerUuid(), message);
     }
 
     @Override
@@ -548,10 +545,7 @@ public class TreasureManager implements RedisSyncManager.SyncCallback {
 
         String announcement = plugin.getMessageManager().get("prefix")
                 + plugin.getMessageManager().get("broadcast.claimed", "claimer", claimerName, "owner", ownerName);
-        if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null),
-                new TextComponent(announcement))) {
-            plugin.getServer().broadcastMessage(announcement);
-        }
+        Announcer.announceText(announcement);
     }
 
     @Override

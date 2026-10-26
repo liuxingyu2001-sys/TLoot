@@ -2,6 +2,15 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)；日期格式为 `YYYY-MM-DD`。
 
+## [1.0.7] - 2026-10-26
+
+### 修复 — 同一条公告重复三次
+
+- 现象：领取宝藏时控制台/全服出现 3 条 `[寻宝] xxx 找到了 ... 发起的宝藏`。
+- 原因：TLoot 通过 LiuChat 的 `broadcastAnnouncement` 发公告，而 LiuChat 这个方法会**本服广播一次 + 经它自己的跨服链路（Redis/BungeeCord）把同一条公告转发到其它子服**；TLoot 本身又有一套 Redis 同步（`publishClaim` → 其它子服 `onTreasureClaimed` 回调再公告一次）。两条链路叠加后，N 台子服就是 N 条重复公告，表现为「3 台子服 = 3 条」。不是 Redis 重复投递：Redis 消息带 `serverId`，本服自回环已被过滤。
+- 修复：新增 `util/Announcer`，本服公告只发本服玩家与控制台、**不再交给 LiuChat 转发**；跨服公告统一由 TLoot 自己的 Redis 同步负责，各发一次。创建寻宝、系统/厄运自动寻宝、守卫清除、取消寻宝、领取宝藏全部改走该路径。
+- 顺带：移除 `LiuChatBridge` 与 `plugin.yml` 的 `LiuChat` 软依赖（不再需要反射调用 LiuChat），公告在无 LiuChat 的服务器上行为完全一致；其它子服收到的厄运宝藏公告改用 `broadcast.doom-created` 文案（此前会显示成普通系统寻宝）。
+
 ## [1.0.6] - 2026-10-26
 
 ### 修复 — 生产环境完整审查

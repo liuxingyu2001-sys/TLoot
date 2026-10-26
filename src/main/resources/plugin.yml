@@ -8,7 +8,6 @@ depend:
   - Vault
   - LiuLib
 softdepend:
-  - LiuChat
   - liuitemlib
   - MythicMobs
 
@@ -20,7 +19,7 @@ libraries:
 commands:
   treasure:
     description: 寻宝系统主命令
-    usage: /treasure [create|join|list|info|reload]
+    usage: /treasure [create|join|list|info|cancel|remove|reload]
     aliases: [tloot, t]
 
 permissions:

@@ -1,8 +1,8 @@
 package com.tloot.task;
 
 import com.tloot.TLoot;
+import com.tloot.util.Announcer;
 import com.tloot.config.LootEntry;
-import com.tloot.integration.LiuChatBridge;
 import com.tloot.integration.MythicMobsBridge;
 import com.tloot.data.Treasure;
 import com.tloot.data.TreasureManager;
@@ -16,7 +16,6 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
 import org.bukkit.block.Block;
-import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
 
@@ -378,11 +377,7 @@ public class AutoTreasureTask extends BukkitRunnable {
         message.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/treasure join " + treasure.getId()));
         message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
                 new ComponentBuilder(plugin.getMessageManager().get("broadcast.hover-join-doom")).create()));
-        if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null), message)) {
-            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
-                onlinePlayer.spigot().sendMessage(message);
-            }
-        }
+        Announcer.announce(message);
     }
 
     private void broadcastTreasure(Treasure treasure) {
@@ -397,10 +392,6 @@ public class AutoTreasureTask extends BukkitRunnable {
         message.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/treasure join " + treasure.getId()));
         message.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
                 new ComponentBuilder(plugin.getMessageManager().get("broadcast.hover-join-system")).create()));
-        if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null), message)) {
-            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
-                onlinePlayer.spigot().sendMessage(message);
-            }
-        }
+        Announcer.announce(message);
     }
 }

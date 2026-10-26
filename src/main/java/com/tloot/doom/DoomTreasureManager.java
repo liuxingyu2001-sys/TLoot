@@ -1,8 +1,8 @@
 package com.tloot.doom;
 
 import com.tloot.TLoot;
+import com.tloot.util.Announcer;
 import com.tloot.data.Treasure;
-import com.tloot.integration.LiuChatBridge;
 import com.tloot.integration.MythicMobsBridge;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.Bukkit;
@@ -177,11 +177,8 @@ public class DoomTreasureManager implements Listener {
         TextComponent message = new TextComponent(
                 plugin.getMessageManager().get("prefix")
                         + plugin.getMessageManager().get("broadcast.doom-cleared", "world", worldDisplayName));
-        if (!LiuChatBridge.broadcast(Bukkit.getOnlinePlayers().stream().findFirst().orElse(null), message)) {
-            for (Player online : Bukkit.getOnlinePlayers()) {
-                online.spigot().sendMessage(message);
-            }
-        }
+        // 只发本服：其它子服由 Redis 同步（onTreasureClaimed 等回调）各自公告一次
+        Announcer.announce(message);
     }
 
     // ==================== 周期维护 ====================
